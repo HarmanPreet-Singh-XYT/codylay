@@ -1,0 +1,2 @@
+[console_scripts]
+codylay = codylay.cli:cli

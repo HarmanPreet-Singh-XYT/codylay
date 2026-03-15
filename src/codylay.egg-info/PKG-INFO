@@ -1,0 +1,176 @@
+Metadata-Version: 2.4
+Name: codylay
+Version: 0.1.0
+Summary: AI Agent for Codebase Documentation
+Author: CodyLay
+License: MIT
+Project-URL: Homepage, https://github.com/HarmanPreet-Singh-XYT/codylay
+Project-URL: Repository, https://github.com/HarmanPreet-Singh-XYT/codylay
+Project-URL: Issues, https://github.com/HarmanPreet-Singh-XYT/codylay/issues
+Project-URL: Documentation, https://github.com/HarmanPreet-Singh-XYT/codylay#readme
+Keywords: documentation,ai,llm,codebase,agent
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Software Development :: Documentation
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: anthropic>=0.39.0
+Requires-Dist: openai>=1.50.0
+Requires-Dist: tiktoken>=0.7.0
+Requires-Dist: pathspec>=0.12.1
+Requires-Dist: click>=8.1.7
+Requires-Dist: rich>=13.9.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Dynamic: license-file
+
+# 🦅 CodyLay
+
+> **AI Agent for Codebase Documentation** — A detective that traces wires through your codebase to build a living reference.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python: 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![PRs: Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+---
+
+CodyLay is a powerful CLI agent that reads unfamiliar codebases and produces a structured Markdown reference. Unlike static docs, CodyLay uses **The Wire Model** to understand how modules connect, what data flows between them, and *why* the architecture is built the way it is.
+
+---
+
+## 🌟 Vision
+
+CodyLay operates like a researcher tracing wires through a complex circuit. It reads file by file, building context incrementally, resolving unknowns, and never carrying more in memory than it needs to.
+
+The result is a comprehensive abstract view of:
+- **What** is happening (purpose of each module)
+- **Where** it is happening (file locations, project structure)
+- **How** it is happening (data flow, call chains, dependencies)
+- **Why** things connect (cross-references, linkage graph)
+
+---
+
+## ⚡️ Quick Start
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/HarmanPreet-Singh-XYT/codylay.git
+cd codylay
+
+# Install the package globally
+pip install .
+```
+
+### Basic Usage
+
+```bash
+# Document the current directory
+export ANTHROPIC_API_KEY=your-key
+codylay .
+
+# Use a specific provider (supports 10+ providers)
+codylay . -p gemini
+
+# Use local Ollama (no API key required)
+codylay . -p ollama
+```
+
+---
+
+## 🔌 The Wire Model
+
+The core abstraction of CodyLay is the **Wire**. A wire represents an **unresolved reference** — an import, a function call, a model reference, or an environment variable that a file mentions but has not yet been explained.
+
+States:
+- **OPEN**: A reference has been seen, but its definition hasn't been documented yet. Open wires influence the planning queue.
+- **CLOSED**: Both ends of the connection have been documented. The link is recorded in `links.json`, and the wire is retired to keep the AI's context window lean.
+
+Any wires remaining open at the end of a run represent external packages, ignored files, or dead code.
+
+---
+
+## 🏗 System Architecture
+
+CodyLay follows a multi-phase agentic loop:
+
+1.  **Bootstrap**: Scans the project root, respects `.gitignore`, and pre-loads existing documentation.
+2.  **Triage**: A fast, AI-driven classification step that categorizes files into **CORE** (full documentation), **SKIM** (metadata only), or **SKIP** (generated/platform code).
+3.  **Planning**: Determines the optimal processing order based on file hierarchy and established entry points.
+4.  **Processing Loop**: The main loop where files are read and processed by the LLM. Large files are handled via a **Skeleton Pass** and subsequent **Detail Passes** to prevent context overflow.
+5.  **Finalize**: Assembles the final `CODEBASE.md`, generates a dependency graph, and surfaces unresolved references.
+
+---
+
+## ⚙️ Configuration
+
+You can place a `codylay.config.json` at your project root to customize the agent's behavior.
+
+```json
+{
+  "ignore": ["**/*.test.js", "dist/"],
+  "notes": "This is a fintech project. Security is a high priority.",
+  "instructions": "Focus on data flow between services. Highlight database schema usage.",
+  "entryHint": "src/main.py",
+  "llm": {
+    "provider": "anthropic",
+    "model": "claude-3-opus-20240229",
+    "maxTokensPerCall": 4096
+  },
+  "triage": {
+    "mode": "smart",
+    "includeTests": false
+  }
+}
+```
+
+### Supported Providers
+
+CodyLay supports **10+ LLM providers** via the `--provider` flag:
+- **Anthropic** (Default), **OpenAI**, **Google Gemini**, **Ollama** (Local), **DeepSeek**, **Groq**, **Mistral**, **xAI**, **Llama Cloud**, and any **Custom** OpenAI-compatible endpoint.
+
+---
+
+## 📂 Project Structure
+
+```
+codylay/
+├── codylay.py           # CLI entry point script
+├── src/codylay/
+│   ├── scanner.py       # File system traversal
+│   ├── triage.py        # AI-driven file classification
+│   ├── planner.py       # Execution order planning
+│   ├── processor.py     # Core agentic loop
+│   ├── wire_manager.py  # Dependency link tracking
+│   ├── docstore.py      # Markdown assembly & caching
+│   └── llm_client.py    # Multi-provider LLM connector
+└── output/              # Generated documentation artifacts
+```
+
+---
+
+## 🛡 Security
+
+We take security seriously. Please read our [SECURITY.md](SECURITY.md) for more details on vulnerability reporting and data privacy. CodyLay never carries local API keys; always use environment variables.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Whether it's adding a new LLM provider, improving the processing logic, or fixing a bug, please check [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+---
+
+## 📜 License
+
+Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+---
+
+*Generated by CodyLay — for the next developer who has to read this codebase.*
