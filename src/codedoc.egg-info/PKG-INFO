@@ -1,0 +1,38 @@
+Metadata-Version: 2.4
+Name: codedoc
+Version: 0.1.0
+Summary: AI Agent for Codebase Documentation
+Author: CodeDoc
+License: MIT
+Keywords: documentation,ai,llm,codebase,agent
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Software Development :: Documentation
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: anthropic>=0.39.0
+Requires-Dist: openai>=1.50.0
+Requires-Dist: tiktoken>=0.7.0
+Requires-Dist: pathspec>=0.12.1
+Requires-Dist: click>=8.1.7
+Requires-Dist: rich>=13.9.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# CodeDoc
+
+AI Agent for Codebase Documentation — reads your code and generates a living, structured Markdown reference.
+
+## Installation
+
+```bash
+# Clone
+git clone https://github.com/yourname/codedoc.git
+cd codedoc
+
+# Install (creates the `codedoc` command globally)
+pip install -e .

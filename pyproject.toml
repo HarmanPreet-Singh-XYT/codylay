@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codedoc"
+version = "0.1.0"
+description = "AI Agent for Codebase Documentation"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "CodeDoc"},
+]
+keywords = ["documentation", "ai", "llm", "codebase", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+]
+
+dependencies = [
+    "anthropic>=0.39.0",
+    "openai>=1.50.0",
+    "tiktoken>=0.7.0",
+    "pathspec>=0.12.1",
+    "click>=8.1.7",
+    "rich>=13.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+]
+
+# THIS IS THE KEY PART — registers the `codedoc` command
+[project.scripts]
+codedoc = "codedoc.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]

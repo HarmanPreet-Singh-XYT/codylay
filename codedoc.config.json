@@ -1,0 +1,24 @@
+{
+  "ignore": [
+    "**/*.test.*",
+    "**/*.spec.*"
+  ],
+  "notes": "",
+  "instructions": "",
+  "entryHint": "",
+  "llm": {
+    "model": "claude-sonnet-4-20250514",
+    "maxTokensPerCall": 4096
+  },
+  "triage": {
+    "mode": "smart",
+    "includeTests": false,
+    "forceInclude": [],
+    "forceSkip": []
+  },
+  "chunking": {
+    "tokenThreshold": 6000,
+    "maxChunkTokens": 4000,
+    "overlapRatio": 0.10
+  }
+}
