@@ -41,6 +41,8 @@ from codilay.settings import Settings
 from codilay.state import AgentState
 from codilay.ui import UI
 from codilay.wire_manager import WireManager
+from codilay.wire_bus import WireBus
+from codilay.parallel_orchestrator import ParallelOrchestrator
 
 console = Console()
 
@@ -167,6 +169,15 @@ def run(ctx, target):
         cfg.llm_model = model_override
     if base_url:
         cfg.llm_base_url = base_url
+
+    # Apply global preferences for parallel processing.
+    # Settings act as user-level defaults; project config overrides them
+    # (CodiLayConfig.load already applied project config values).
+    # We only override if the user has explicitly toggled parallel off in prefs.
+    if not settings.parallel:
+        cfg.parallel = False
+    if settings.max_workers != 4:  # non-default means user changed it
+        cfg.max_workers = settings.max_workers
 
     ui.show_config(cfg)
 
@@ -481,74 +492,148 @@ def run(ctx, target):
     # ── Phase 3: Processing Loop ─────────────────────────────────
     ui.phase("Phase 3 · Processing — Reading files and building docs")
 
+    # Wrap WireManager in thread-safe WireBus for parallel processing
+    wire_bus = WireBus(wire_mgr)
     processor = Processor(llm, cfg, wire_mgr, docstore, state, ui)
 
     total_files = len(state.queue)
     processed_count = 0
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TextColumn("({task.completed}/{task.total})"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Processing files", total=total_files)
+    use_parallel = cfg.parallel and total_files > 1
 
-        while state.queue:
-            file_path = state.queue.pop(0)
+    if use_parallel:
+        # ── Parallel tier-based processing ───────────────────────
+        ui.info(f"  Parallel processing enabled (max {cfg.max_workers} workers)")
+
+        # Pre-load all file contents for parallel access
+        file_contents = {}
+        for file_path in list(state.queue):
             full_path = os.path.join(target, file_path)
+            if os.path.exists(full_path):
+                content = scanner.read_file(full_path)
+                if content is not None:
+                    file_contents[file_path] = content
 
-            if not os.path.exists(full_path):
-                ui.warn(f"File not found, skipping: {file_path}")
-                progress.advance(task)
-                continue
+        orchestrator = ParallelOrchestrator(
+            processor=processor,
+            wire_bus=wire_bus,
+            docstore=docstore,
+            state=state,
+            scanner=scanner,
+            target_path=target,
+            ui=ui,
+            max_workers=cfg.max_workers,
+        )
 
-            progress.update(task, description=f"Processing: {file_path}")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("({task.completed}/{task.total})"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Processing files", total=total_files)
+
+            def on_progress(file_path, completed, total):
+                progress.update(task, description=f"Processed: {file_path}")
+                progress.update(task, completed=completed, total=total)
 
             try:
-                content = scanner.read_file(full_path)
-                if content is None:
-                    ui.warn(f"Could not read (binary?): {file_path}")
+                parallel_result = orchestrator.process_all(
+                    files_to_process=list(state.queue),
+                    file_contents=file_contents,
+                    progress_callback=on_progress,
+                )
+
+                # Show parallel processing stats
+                pstats = parallel_result["stats"]
+                dep_stats = parallel_result["dep_graph_stats"]
+                ui.info(
+                    f"  Parallel stats: {pstats['parallel_files']} parallel, "
+                    f"{pstats['sequential_files']} sequential, "
+                    f"{pstats['tier_count']} tiers, "
+                    f"max parallelism: {dep_stats['max_parallelism']}"
+                )
+                if pstats["unparked_count"] > 0:
+                    ui.info(f"  ↳ {pstats['unparked_count']} files auto-unparked")
+
+            except Exception as e:
+                ui.error(f"Parallel processing failed: {e}")
+                if verbose:
+                    console.print_exception()
+                ui.warn("Falling back to sequential processing...")
+                use_parallel = False
+
+            # Save checkpoint after parallel processing
+            orchestrator.save_checkpoint(state_path)
+            orchestrator.cleanup()
+
+    if not use_parallel:
+        # ── Sequential processing (original loop / fallback) ─────
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TextColumn("({task.completed}/{task.total})"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Processing files", total=total_files)
+
+            while state.queue:
+                file_path = state.queue.pop(0)
+                full_path = os.path.join(target, file_path)
+
+                if not os.path.exists(full_path):
+                    ui.warn(f"File not found, skipping: {file_path}")
                     progress.advance(task)
                     continue
 
-                result = processor.process_file(file_path, content)
+                progress.update(task, description=f"Processing: {file_path}")
 
-                # Track processed files (avoid duplicates on re-runs)
-                if file_path not in state.processed:
-                    state.processed.append(file_path)
-                processed_count += 1
+                try:
+                    content = scanner.read_file(full_path)
+                    if content is None:
+                        ui.warn(f"Could not read (binary?): {file_path}")
+                        progress.advance(task)
+                        continue
 
-                # Store file hash for future diffing
-                file_hash = scanner.get_file_hash(full_path)
-                if file_hash:
-                    state.file_hashes[file_path] = file_hash
+                    result = processor.process_file(file_path, content)
 
-                # Check for unparked files
-                if result and result.get("unpark"):
-                    for up in result["unpark"]:
-                        if up in state.parked:
-                            state.parked.remove(up)
-                            state.queue.append(up)
-                            total_files += 1
-                            progress.update(task, total=total_files)
-                            ui.info(f"  ↳ Unparked: {up}")
+                    # Track processed files (avoid duplicates on re-runs)
+                    if file_path not in state.processed:
+                        state.processed.append(file_path)
+                    processed_count += 1
 
-                # Save after every file (crash recovery)
-                state.open_wires = wire_mgr.get_open_wires()
-                state.closed_wires = wire_mgr.get_closed_wires()
-                state.section_index = docstore.get_section_index()
-                state.section_contents = docstore.get_section_contents()
-                state.save(state_path)
+                    # Store file hash for future diffing
+                    file_hash = scanner.get_file_hash(full_path)
+                    if file_hash:
+                        state.file_hashes[file_path] = file_hash
 
-            except Exception as e:
-                ui.error(f"Error processing {file_path}: {e}")
-                if verbose:
-                    console.print_exception()
+                    # Check for unparked files
+                    if result and result.get("unpark"):
+                        for up in result["unpark"]:
+                            if up in state.parked:
+                                state.parked.remove(up)
+                                state.queue.append(up)
+                                total_files += 1
+                                progress.update(task, total=total_files)
+                                ui.info(f"  ↳ Unparked: {up}")
 
-            progress.advance(task)
+                    # Save after every file (crash recovery)
+                    state.open_wires = wire_mgr.get_open_wires()
+                    state.closed_wires = wire_mgr.get_closed_wires()
+                    state.section_index = docstore.get_section_index()
+                    state.section_contents = docstore.get_section_contents()
+                    state.save(state_path)
+
+                except Exception as e:
+                    ui.error(f"Error processing {file_path}: {e}")
+                    if verbose:
+                        console.print_exception()
+
+                progress.advance(task)
 
     # ── Phase 3b: Parked files ───────────────────────────────────
     if state.parked:

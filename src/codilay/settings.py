@@ -69,6 +69,8 @@ class Settings:
     triage_mode: str = "smart"  # smart | fast | none
     include_tests: bool = False
     max_tokens_per_call: int = 4096
+    parallel: bool = True  # tier-based parallel processing
+    max_workers: int = 4  # max concurrent workers per tier
 
     # ── persistence ───────────────────────────────────────────────
 

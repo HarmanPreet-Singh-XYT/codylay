@@ -50,6 +50,10 @@ class CodiLayConfig:
     max_chunk_tokens: int = 4000  # Max tokens per detail chunk
     chunk_overlap_ratio: float = 0.10  # 10% overlap between chunks
 
+    # Parallel processing options
+    parallel: bool = True  # Enable tier-based parallel processing
+    max_workers: int = 4  # Max concurrent workers per tier
+
     @classmethod
     def load(cls, target_path: str, config_path: Optional[str] = None) -> "CodiLayConfig":
         config = cls(target_path=target_path)
@@ -94,5 +98,13 @@ class CodiLayConfig:
                 config.chunk_token_threshold = chunking.get("tokenThreshold", 6000)
                 config.max_chunk_tokens = chunking.get("maxChunkTokens", 4000)
                 config.chunk_overlap_ratio = chunking.get("overlapRatio", 0.10)
+
+            # Parallel processing
+            parallel = data.get("parallel", {})
+            if isinstance(parallel, bool):
+                config.parallel = parallel
+            elif isinstance(parallel, dict):
+                config.parallel = parallel.get("enabled", True)
+                config.max_workers = parallel.get("maxWorkers", 4)
 
         return config

@@ -545,13 +545,17 @@ def _menu_preferences(settings: Settings):
             f"  [bold cyan][3][/bold cyan] Include test files:  [bold]{'Yes' if settings.include_tests else 'No'}[/bold]"
         )
         console.print(f"  [bold cyan][4][/bold cyan] Max tokens per call: [bold]{settings.max_tokens_per_call}[/bold]")
+        console.print(
+            f"  [bold cyan][5][/bold cyan] Parallel processing: [bold]{'Yes' if settings.parallel else 'No'}[/bold]"
+        )
+        console.print(f"  [bold cyan][6][/bold cyan] Max parallel workers: [bold]{settings.max_workers}[/bold]")
         console.print()
         console.print("  [bold cyan][0][/bold cyan] ← Back to main menu")
         console.print()
 
         choice = Prompt.ask(
             "Which setting to change?",
-            choices=["0", "1", "2", "3", "4"],
+            choices=["0", "1", "2", "3", "4", "5", "6"],
             default="0",
         )
 
@@ -597,6 +601,29 @@ def _menu_preferences(settings: Settings):
                 console.print("[yellow]Invalid number[/yellow]")
             _pause()
 
+        elif choice == "5":
+            settings.parallel = not settings.parallel
+            settings.save()
+            state = "ON" if settings.parallel else "OFF"
+            console.print(f"\n[green]✓[/green] Parallel processing: [bold]{state}[/bold]")
+            _pause()
+
+        elif choice == "6":
+            raw = Prompt.ask(
+                f"  Max parallel workers [dim](currently {settings.max_workers}, 1-16, 0 to cancel)[/dim]",
+                default=str(settings.max_workers),
+            )
+            if _is_back(raw):
+                continue
+            try:
+                workers = int(raw)
+                settings.max_workers = max(1, min(workers, 16))
+                settings.save()
+                console.print(f"\n[green]✓[/green] Max workers: [bold]{settings.max_workers}[/bold]")
+            except ValueError:
+                console.print("[yellow]Invalid number[/yellow]")
+            _pause()
+
 
 # ── 6. View Settings ─────────────────────────────────────────────────────────
 
@@ -618,6 +645,8 @@ def _menu_view_settings(settings: Settings):
     table.add_row("Triage mode", settings.triage_mode)
     table.add_row("Include tests", "Yes" if settings.include_tests else "No")
     table.add_row("Max tokens/call", str(settings.max_tokens_per_call))
+    table.add_row("Parallel processing", "Yes" if settings.parallel else "No")
+    table.add_row("Max parallel workers", str(settings.max_workers))
     if settings.custom_base_url:
         table.add_row("Custom base URL", settings.custom_base_url)
     table.add_row("Settings file", str(SETTINGS_FILE))
