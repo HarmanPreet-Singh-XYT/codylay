@@ -337,6 +337,7 @@ def run(ctx, target, scope):
 
     files_to_process = all_files
     triage_result = None
+    added_files: set = set()  # populated in git_update mode to track newly-added files
 
     if mode == "full" and cfg.triage_mode != "none":
         ui.phase("Phase 1.5 · Triage — Classifying files to save tokens")
@@ -509,6 +510,7 @@ def run(ctx, target, scope):
                 state.processed.remove(deleted_path)
             delete_count += 1
 
+        added_files = {c.path for c in diff_result.added}
         files_to_process = diff_result.files_to_process
         valid_files = set(all_files)
         files_to_process = [f for f in files_to_process if f in valid_files]
@@ -573,7 +575,20 @@ def run(ctx, target, scope):
         docstore.invalidate_sections_for_files(specific)
 
     # ── Phase 2: Planning ────────────────────────────────────────
-    if mode != "resume":
+    if mode == "git_update":
+        # For git-aware incremental updates we skip LLM planning entirely.
+        # We already know the exact set of changed files from the diff.
+        # Put modified files first (updating existing docs) then newly added
+        # files (creating new docs) — deterministic, no LLM call needed.
+        ui.phase("Phase 2 · Planning — Ordering changed files (git mode)")
+        modified_first = [f for f in files_to_process if f not in added_files]
+        new_after = [f for f in files_to_process if f in added_files]
+        state.queue = modified_first + new_after
+        # Do NOT touch state.parked — parked files from the original run remain
+        # parked unless a changed file now has a wire pointing to them (already
+        # handled above in the git_update block).
+        ui.show_plan(state.queue, state.parked, {})
+    elif mode != "resume":
         ui.phase("Phase 2 · Planning — Determining processing order")
 
         planner = Planner(llm, cfg)

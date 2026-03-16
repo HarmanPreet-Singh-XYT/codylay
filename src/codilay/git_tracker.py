@@ -247,9 +247,18 @@ class GitTracker:
             if c.path not in committed_paths:
                 merged_changes.append(c)
             else:
-                # File was changed in commits AND has further uncommitted changes
-                # Keep the committed entry but note it has further changes
-                pass
+                # File was changed in commits AND has further uncommitted changes.
+                # Upgrade the committed entry to MODIFIED so it still gets
+                # re-processed (e.g. a file added in a previous commit that has
+                # further edits in the working tree must not be silently dropped).
+                existing = committed_paths[c.path]
+                if existing.change_type == ChangeType.ADDED:
+                    # Stay as ADDED — it will be picked up for processing
+                    pass
+                elif existing.change_type != ChangeType.DELETED:
+                    # Ensure it is at least MODIFIED so it is included in
+                    # files_to_process even if git diff showed a rename/copy
+                    existing.change_type = ChangeType.MODIFIED
 
         committed_diff.changes = merged_changes
         return committed_diff
