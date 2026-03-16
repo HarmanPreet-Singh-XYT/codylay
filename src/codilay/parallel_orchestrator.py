@@ -136,7 +136,9 @@ class ParallelOrchestrator:
         }
 
         # Wire event handler for auto-unparking
-        self.wire_bus.subscribe(self._on_wire_event)
+        # Store reference to avoid bound-method identity issues on unsubscribe
+        self._wire_event_handler = self._on_wire_event
+        self.wire_bus.subscribe(self._wire_event_handler)
 
     # ── Main entry point ─────────────────────────────────────────
 
@@ -546,4 +548,4 @@ class ParallelOrchestrator:
 
     def cleanup(self):
         """Clean up resources."""
-        self.wire_bus.unsubscribe(self._on_wire_event)
+        self.wire_bus.unsubscribe(self._wire_event_handler)
