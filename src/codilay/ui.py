@@ -395,6 +395,21 @@ class UI:
                 f"~{saved_k:.0f}K tokens by skipping {len(triage_result.skip)} files"
             )
 
+    def show_triage_warnings(self, warnings):
+        """Display warnings from triage (AI suggestions or borderline files)."""
+        if not warnings:
+            return
+        self.console.print()
+        self.console.print(Panel(
+            "[bold yellow]Some files may require review:[/bold yellow]",
+            border_style="yellow",
+            title="[bold yellow]Warnings[/bold yellow]",
+            padding=(0, 2)
+        ))
+        for warning in warnings:
+            self.console.print(f"  [yellow]⚠[/yellow] {warning}")
+        self.console.print()
+
     def prompt_triage_review(self) -> str:
         """
         Ask user to confirm or edit triage classification.
