@@ -396,7 +396,12 @@ class Watcher:
 
                     try:
                         self.console.print(f"  [dim]Processing {file_path}...[/dim]")
-                        processor.process_file(file_path)
+
+                        # Read file content
+                        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
+                            content = f.read()
+
+                        processor.process_file(file_path, content)
 
                         if file_path not in state.processed:
                             state.processed.append(file_path)

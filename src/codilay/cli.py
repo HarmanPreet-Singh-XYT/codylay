@@ -275,7 +275,7 @@ def run(ctx, target):
 
     # ── Init components ──────────────────────────────────────────
     llm = LLMClient(cfg)
-    scanner = Scanner(target, cfg)
+    scanner = Scanner(target, cfg, output_dir=output_dir)
     wire_mgr = WireManager()
     docstore = DocStore()
     state = existing_state or AgentState(run_id=datetime.now(timezone.utc).isoformat())

@@ -151,9 +151,10 @@ class Scanner:
         "docker-compose.yaml",
     }
 
-    def __init__(self, target_path: str, config):
+    def __init__(self, target_path: str, config, output_dir: Optional[str] = None):
         self.target_path = os.path.abspath(target_path)
         self.config = config
+        self.output_dir = os.path.abspath(output_dir) if output_dir else None
         self._build_ignore_spec()
 
     def _build_ignore_spec(self):
@@ -165,6 +166,8 @@ class Scanner:
             "__pycache__/",
             "__pycache__/**",
             ".codilay_state.json",
+            "codilay/",
+            "codilay/**",
             "output/",
             "output/**",
             ".venv/",
@@ -187,6 +190,16 @@ class Scanner:
 
         patterns.extend(self.config.ignore_patterns)
         patterns.extend(self.config.skip_generated)
+
+        if self.output_dir:
+            try:
+                rel_output = os.path.relpath(self.output_dir, self.target_path)
+                if not rel_output.startswith("..") and rel_output != ".":
+                    rel_output = rel_output.replace(os.sep, "/")
+                    patterns.append(f"{rel_output}/")
+                    patterns.append(f"{rel_output}/**")
+            except ValueError:
+                pass
 
         self.ignore_spec = pathspec.PathSpec.from_lines("gitwildmatch", patterns)
 
@@ -245,11 +258,23 @@ class Scanner:
 
     def get_file_tree(self) -> str:
         try:
+            # Build exclude pattern for tree command
+            exclude_pattern = "node_modules|.git|__pycache__|codilay|output|venv|.venv"
+            if self.output_dir:
+                try:
+                    rel_output = os.path.relpath(self.output_dir, self.target_path)
+                    if not rel_output.startswith("..") and rel_output != ".":
+                        basename = os.path.basename(rel_output)
+                        if basename not in exclude_pattern.split("|"):
+                            exclude_pattern += f"|{basename}"
+                except ValueError:
+                    pass
+
             result = subprocess.run(
                 [
                     "tree",
                     "-I",
-                    "node_modules|.git|__pycache__|output|venv|.venv",
+                    exclude_pattern,
                     "--charset=ascii",
                     "-f",
                 ],
