@@ -285,12 +285,20 @@ class Processor:
                 if isinstance(wire_data, dict):
                     to_target = wire_data.get("to", "")
                     if to_target:
-                        self.wire_mgr.open_wire(
+                        wire = self.wire_mgr.open_wire(
                             from_file=file_path,
                             to_target=to_target,
                             wire_type=wire_data.get("type", "unknown"),
                             context=wire_data.get("context", ""),
                         )
+                        # Eager resolution: Check if this points to an already documented section or the current file
+                        resolution = self._resolve_target(to_target, file_path)
+                        if resolution:
+                            self.wire_mgr.close_wire(
+                                wire["id"],
+                                resolved_in=resolution["file"],
+                                summary=f"Eagerly resolved reference to {to_target}",
+                            )
 
         park_new = result.get("park_new", [])
         if isinstance(park_new, list):
@@ -324,12 +332,20 @@ class Processor:
                 if isinstance(wire_data, dict):
                     to_target = wire_data.get("to", "")
                     if to_target:
-                        self.wire_mgr.open_wire(
+                        wire = self.wire_mgr.open_wire(
                             from_file=file_path,
                             to_target=to_target,
                             wire_type=wire_data.get("type", "unknown"),
                             context=wire_data.get("context", ""),
                         )
+                        # Eager resolution
+                        resolution = self._resolve_target(to_target, file_path)
+                        if resolution:
+                            self.wire_mgr.close_wire(
+                                wire["id"],
+                                resolved_in=resolution["file"],
+                                summary=f"Eagerly resolved reference to {to_target}",
+                            )
 
     def finalize(self, file_tree: str):
         """Run the finalization pass."""
@@ -421,3 +437,38 @@ class Processor:
         slug = re.sub(r"[^a-z0-9-]", "-", slug)
         slug = re.sub(r"-+", "-", slug).strip("-")
         return slug or "unnamed-section"
+
+    def _resolve_target(self, target_str: str, current_file: str) -> Optional[Dict[str, str]]:
+        """
+        Try to resolve a target string to a section or file.
+        Returns {'file': ..., 'section_id': ...} or None.
+        """
+        # 1. Check if it's the current file (self-reference)
+        if (
+            target_str == current_file
+            or current_file.endswith("/" + target_str)
+            or target_str in current_file
+        ):
+            return {"file": current_file, "section_id": self._path_to_id(current_file)}
+
+        # 2. Check already documented sections
+        index = self.docstore.get_section_index()
+        target_lower = target_str.lower()
+
+        for sid, meta in index.items():
+            fpath = meta.get("file", "")
+            
+            # Match by exact file path or suffix
+            if fpath == target_str or (fpath and fpath.endswith("/" + target_str)):
+                return {"file": fpath, "section_id": sid}
+
+            # Match by tags (case-insensitive)
+            tags = [t.lower() for t in meta.get("tags", [])]
+            if target_lower in tags:
+                return {"file": fpath, "section_id": sid}
+                
+            # Match by section ID
+            if sid == target_lower or sid.replace("-", "") == target_lower.replace("-", ""):
+                return {"file": fpath, "section_id": sid}
+
+        return None

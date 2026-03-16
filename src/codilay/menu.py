@@ -129,7 +129,8 @@ def main_menu(settings: Settings) -> Optional[dict]:
         menu.add_row("[5]", "🔧  Preferences")
         menu.add_row("[6]", "📊  View current settings")
         menu.add_row("[7]", "💬  Chat with your codebase")
-        menu.add_row("[8]", "❓  Help")
+        menu.add_row("[8]", "🌐  Launch Web UI")
+        menu.add_row("[9]", "❓  Help")
         menu.add_row("[0]", "🚪  Exit")
 
         console.print(menu)
@@ -137,7 +138,7 @@ def main_menu(settings: Settings) -> Optional[dict]:
 
         choice = Prompt.ask(
             "[bold cyan]Select an option[/bold cyan]",
-            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8"],
+            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
             default="1",
         )
 
@@ -171,6 +172,11 @@ def main_menu(settings: Settings) -> Optional[dict]:
                 return result
 
         elif choice == "8":
+            result = _menu_serve(settings)
+            if result:
+                return result
+
+        elif choice == "9":
             _menu_help()
 
 
@@ -568,7 +574,7 @@ def _menu_preferences(settings: Settings):
                 continue
             try:
                 tokens = int(raw)
-                settings.max_tokens_per_call = max(1024, min(tokens, 32768))
+                settings.max_tokens_per_call = max(1024, min(tokens, 1000000))
                 settings.save()
                 console.print(f"\n[green]✓[/green] Max tokens: [bold]{settings.max_tokens_per_call}[/bold]")
             except ValueError:
@@ -682,6 +688,39 @@ def _menu_chat(settings: Settings) -> Optional[dict]:
     return {"action": "chat", "target": target}
 
 
+# ── 8. Web UI ─────────────────────────────────────────────────────────────────
+
+def _menu_serve(settings: Settings) -> Optional[dict]:
+    """Prompt for a codebase path and launch web UI."""
+    _clear()
+    _header("Launch Web UI")
+    _back_hint()
+
+    raw = Prompt.ask(
+        "Path to documented codebase", default="."
+    )
+    if _is_back(raw):
+        return None
+
+    target = os.path.abspath(raw)
+    if not os.path.isdir(target):
+        console.print(f"[red]Not a directory: {target}[/red]")
+        _pause()
+        return None
+
+    output_dir = os.path.join(target, "codilay")
+    codebase_md = os.path.join(output_dir, "CODEBASE.md")
+    if not os.path.exists(codebase_md):
+        console.print(
+            f"[red]No documentation found at {output_dir}[/red]\n"
+            f"[dim]Run [bold]codilay {target}[/bold] first to generate docs.[/dim]"
+        )
+        _pause()
+        return None
+
+    return {"action": "serve", "target": target}
+
+
 # ── 8. Help ───────────────────────────────────────────────────────────────────
 
 def _menu_help():
@@ -701,6 +740,7 @@ def _menu_help():
         "  [bold]codilay /path/to/project[/bold]         Document a project\n"
         "  [bold]codilay . -p openai -m gpt-4o[/bold]    Override provider/model\n"
         "  [bold]codilay chat .[/bold]                   Chat with your codebase\n"
+        "  [bold]codilay serve .[/bold]                  Launch web documentation browser\n"
         "  [bold]codilay chat . --resume[/bold]          Resume last conversation\n"
         "  [bold]codilay chat . --list[/bold]            List past conversations\n"
         "  [bold]codilay setup[/bold]                    Run setup wizard\n"

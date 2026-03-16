@@ -263,24 +263,46 @@ class DocStore:
 
     def add_unresolved_references(self, open_wires: List[Dict]):
         if not open_wires:
-            content = "*All references were resolved within the codebase.* ✓"
+            content = "*All references were resolved within the codebase. ✓*"
         else:
-            content = (
-                "| From | To | Type | Notes |\n"
-                "|------|----|------|-------|\n"
-            )
-            for w in open_wires:
-                notes = w.get(
-                    "context", w.get("classification_note", "")
-                ).replace("|", "\\|")
-                content += (
-                    f"| `{w.get('from', '?')}` | `{w.get('to', '?')}` "
-                    f"| {w.get('type', '?')} | {notes} |\n"
-                )
+            # Group by classification
+            external = [w for w in open_wires if w.get("classification") == "external_package"]
+            config = [w for w in open_wires if w.get("classification") == "config_dependency"]
+            others = [w for w in open_wires if w not in external and w not in config]
+
+            content = ""
+            
+            if others:
+                content += "### Missing or Dead References\n"
+                content += "| From | To | Type | Notes |\n"
+                content += "|------|----|------|-------|\n"
+                for w in others:
+                    notes = w.get("context", w.get("classification_note", "")).replace("|", "\\|")
+                    content += f"| `{w.get('from', '?')}` | `{w.get('to', '?')}` | {w.get('type', '?')} | {notes} |\n"
+                content += "\n"
+
+            if config:
+                content += "### Configuration & Environment Dependencies\n"
+                content += "| From | To | Type | Notes |\n"
+                content += "|------|----|------|-------|\n"
+                for w in config:
+                    notes = w.get("context", w.get("classification_note", "")).replace("|", "\\|")
+                    content += f"| `{w.get('from', '?')}` | `{w.get('to', '?')}` | {w.get('type', '?')} | {notes} |\n"
+                content += "\n"
+
+            if external:
+                content += "<details>\n<summary><b>External Libraries & Packages (" + str(len(external)) + ")</b></summary>\n\n"
+                content += "| From | To | Type | Notes |\n"
+                content += "|------|----|------|-------|\n"
+                for w in external:
+                    notes = w.get("context", w.get("classification_note", "")).replace("|", "\\|")
+                    content += f"| `{w.get('from', '?')}` | `{w.get('to', '?')}` | {w.get('type', '?')} | {notes} |\n"
+                content += "\n</details>\n"
+
         self.add_section(
             section_id="unresolved-references",
             title="Unresolved References",
-            content=content,
+            content=content or "*No significant unresolved references found.*",
             tags=["unresolved", "open-wires"],
         )
 

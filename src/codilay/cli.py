@@ -1044,6 +1044,9 @@ def interactive(ctx):
         settings.inject_env_vars()
         ctx.invoke(chat, target=result["target"])
 
+    elif result and result.get("action") == "serve":
+        ctx.invoke(serve, target=result["target"])
+
 
 # ─── Setup wizard ─────────────────────────────────────────────────────────────
 
