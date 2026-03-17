@@ -178,6 +178,32 @@ class Scanner:
             ".env/**",
             "env/",
             "env/**",
+            "build/",
+            "build/**",
+            "dist/",
+            "dist/**",
+            ".dart_tool/",
+            ".dart_tool/**",
+            ".gradle/",
+            ".gradle/**",
+            "Pods/",
+            "Pods/**",
+            ".idea/",
+            ".idea/**",
+            ".vscode/",
+            ".vscode/**",
+            ".vs/",
+            ".vs/**",
+            "target/",
+            "target/**",
+            "out/",
+            "out/**",
+            ".cache/",
+            ".cache/**",
+            ".next/",
+            ".next/**",
+            "coverage/",
+            "coverage/**",
         ]
 
         gitignore_path = os.path.join(self.target_path, ".gitignore")
@@ -225,7 +251,49 @@ class Scanner:
             return False
 
     def get_all_files(self) -> List[str]:
+        if hasattr(self, "_cached_files"):
+            return self._cached_files
+
         files = []
+
+        # ── Strategy 1: Git-aware discovery (fastest, most accurate) ───────────
+        try:
+            # git ls-files --cached --others --exclude-standard handles:
+            # - Tracked files
+            # - Untracked NOT-ignored files
+            # - Nested .gitignore files correctly
+            result = subprocess.run(
+                ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+                cwd=self.target_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                git_lines = result.stdout.splitlines()
+                for rel_path in git_lines:
+                    rel_path = rel_path.replace(os.sep, "/")
+                    if self._is_ignored(rel_path):
+                        continue
+
+                    full_path = os.path.join(self.target_path, rel_path)
+                    if not os.path.isfile(full_path):
+                        continue
+
+                    try:
+                        size = os.path.getsize(full_path)
+                        if 0 < size <= self.config.max_file_size:
+                            if self._is_text_file(full_path):
+                                files.append(rel_path)
+                    except OSError:
+                        pass
+
+                self._cached_files = sorted(files)
+                return self._cached_files
+        except (FileNotFoundError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            pass
+
+        # ── Strategy 2: Manual walk fallback ─────────────────────────────────────
         for root, dirs, filenames in os.walk(self.target_path):
             rel_root = os.path.relpath(root, self.target_path)
             if rel_root == ".":
@@ -246,48 +314,21 @@ class Scanner:
 
                 try:
                     size = os.path.getsize(full_path)
-                    if size > self.config.max_file_size or size == 0:
-                        continue
+                    if 0 < size <= self.config.max_file_size:
+                        if self._is_text_file(full_path):
+                            files.append(rel_path)
                 except OSError:
                     continue
 
-                if self._is_text_file(full_path):
-                    files.append(rel_path)
-
-        return files
+        self._cached_files = sorted(files)
+        return self._cached_files
 
     def get_file_tree(self) -> str:
-        try:
-            # Build exclude pattern for tree command
-            exclude_pattern = "node_modules|.git|__pycache__|codilay|output|venv|.venv"
-            if self.output_dir:
-                try:
-                    rel_output = os.path.relpath(self.output_dir, self.target_path)
-                    if not rel_output.startswith("..") and rel_output != ".":
-                        basename = os.path.basename(rel_output)
-                        if basename not in exclude_pattern.split("|"):
-                            exclude_pattern += f"|{basename}"
-                except ValueError:
-                    pass
-
-            result = subprocess.run(
-                [
-                    "tree",
-                    "-I",
-                    exclude_pattern,
-                    "--charset=ascii",
-                    "-f",
-                ],
-                cwd=self.target_path,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-
+        """
+        Builds a visual file tree.
+        Always uses the internal _build_tree logic to ensure parity
+        with identical ignore rules as get_all_files.
+        """
         return self._build_tree()
 
     def _build_tree(self) -> str:

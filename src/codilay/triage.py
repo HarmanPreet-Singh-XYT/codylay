@@ -217,6 +217,10 @@ class Triage:
 
         from codilay.prompts import system_prompt, triage_prompt
 
+        # Truncate file tree if absurdly large to avoid context/token limits
+        if len(file_tree) > 32000:
+            file_tree = file_tree[:32000] + "\n\n... [TRUNCATED DUE TO SIZE]"
+
         sys_prompt = system_prompt(
             self.config,
             response_style=getattr(self.config, "response_style", "technical"),
@@ -231,18 +235,22 @@ class Triage:
             instructions=self.config.instructions if self.config else "",
         )
 
-        response = self.llm.call(sys_prompt, user_prompt)
+        try:
+            response = self.llm.call(sys_prompt, user_prompt)
 
-        if "error" in response:
-            # Fallback to fast triage
+            if "error" in response:
+                # Fallback to fast triage
+                return self.fast_triage(all_files)
+
+            result = self._parse_response(response, all_files)
+
+            # Safety net: never let the AI process things we KNOW are garbage
+            self._apply_safety_net(result)
+
+            return result
+        except Exception:
+            # Any LLM error (timeout, rate limit, etc.) should fallback to fast triage
             return self.fast_triage(all_files)
-
-        result = self._parse_response(response, all_files)
-
-        # Safety net: never let the AI process things we KNOW are garbage
-        self._apply_safety_net(result)
-
-        return result
 
     def _parse_response(self, response: Dict[str, Any], all_files: List[str]) -> TriageResult:
         """Parse the LLM triage response into a TriageResult."""
