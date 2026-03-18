@@ -145,6 +145,42 @@ codilay diff-doc . --json-output
 
 Snapshots are saved automatically after every `codilay run`, so diffs are always available.
 
+### 📝 Diff-Run — Document Changes Only
+Generate focused documentation for code changes since a specific boundary instead of analyzing the entire codebase. Perfect for feature branches, pull requests, and incremental updates.
+
+**Boundary Types:**
+- **Commit hash**: `--since abc123f`
+- **Git tag**: `--since v2.1.0`
+- **Date**: `--since 2024-03-01` (YYYY-MM-DD format)
+- **Branch**: `--since-branch main` (uses merge-base for comparison)
+
+**Examples:**
+```bash
+# Document changes since a specific commit
+codilay diff-run . --since abc123f
+
+# Document all changes since a release tag
+codilay diff-run . --since v2.1.0
+
+# Document changes since last month
+codilay diff-run . --since 2024-03-01
+
+# Document changes on a feature branch (vs main)
+codilay diff-run . --since-branch main
+
+# Update CODEBASE.md with change analysis
+codilay diff-run . --since-branch main --update-doc
+```
+
+**What You Get:**
+- **Change Summary**: AI-generated overview of what changed and why it matters
+- **Added/Modified/Deleted Files**: Detailed impact analysis for each change
+- **Wire Impact Report**: Dependencies introduced, satisfied, or broken
+- **Affected Documentation Sections**: Which existing docs may need updating
+- **Commit Context**: All commits included in the diff for reference
+
+The report is saved as `CHANGES_{boundary_type}_{timestamp}.md` in your codilay output directory, making it easy to track documentation changes alongside code changes.
+
 ### 🎯 Triage Tuning
 Flag incorrect triage decisions to improve future runs. Corrections are stored per-project and automatically applied during the triage phase of subsequent runs.
 
@@ -282,6 +318,7 @@ codilay schedule disable .
 | `codilay serve .` | Launch the **Web UI** |
 | `codilay status .` | Show documentation coverage and stale sections |
 | `codilay diff .` | See what changed in files since the last run |
+| `codilay diff-run .` | **Document changes only** (since commit/tag/date/branch) |
 | `codilay setup` | Configure default provider, model, and API keys |
 | `codilay keys` | Manage stored API keys |
 | `codilay clean .` | Wipe all generated artifacts |
@@ -377,6 +414,8 @@ src/codilay/
 ├── watcher.py          # File system watcher (watch mode)
 ├── exporter.py         # AI-friendly doc export (markdown/xml/json)
 ├── doc_differ.py       # Section-level doc diffing & version snapshots
+├── diff_analyzer.py    # Git diff extraction & boundary resolution (diff-run)
+├── change_report.py    # Change report generation (diff-run)
 ├── triage_feedback.py  # Triage correction store & feedback loop
 ├── graph_filter.py     # Dependency graph filtering engine
 ├── team_memory.py      # Shared team knowledge base
