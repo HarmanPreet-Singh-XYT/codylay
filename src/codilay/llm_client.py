@@ -360,7 +360,7 @@ class LLMClient:
         except json.JSONDecodeError as e:
             if "Extra data" in str(e):
                 try:
-                    parsed = json.loads(text[:e.pos].strip())
+                    parsed = json.loads(text[: e.pos].strip())
                 except Exception:
                     raise e
             else:
@@ -396,14 +396,14 @@ class LLMClient:
                 # Strategy 2: Handle extra data after valid object
                 if "Extra data" in str(e):
                     try:
-                        parsed = json.loads(candidate[:e.pos].strip())
+                        parsed = json.loads(candidate[: e.pos].strip())
                         if isinstance(parsed, dict):
                             return parsed
                     except Exception:
                         pass
 
                 # Strategy 3: Truncated JSON repair
-                for suffix in ["}", "\"", "\"}", "\"}]}", "\"}}", "}}", "]}", "]}"] :
+                for suffix in ["}", '"', '"}', '"}]}', '"}}', "}}", "]}", "]}"]:
                     try:
                         parsed = json.loads(candidate + suffix)
                         if isinstance(parsed, dict):
