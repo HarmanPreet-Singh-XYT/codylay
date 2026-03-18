@@ -58,15 +58,19 @@ Forget about exporting API keys every time. Run the setup wizard to securely sto
 codilay setup
 ```
 
-```bash
-codilay
-```
-
-Running `codilay` with no arguments opens the **Interactive Control Center**, allowing you to manage projects, configure providers, and launch scans without memorizing flags.
+Running `codilay` with no arguments opens the **Interactive Control Center**, a premium terminal-based dashboard that lets you manage projects, configurations, and audits without memorizing flags.
 
 ---
 
 ## 🛠 Features
+
+### 🎮 Interactive Control Center (Terminal Dashboard)
+Why use flags when you can have a full-blown dashboard in your terminal?
+- **Project Switcher**: Quickly jump between documented codebases.
+- **Provider Wizard**: Configure keys and models with real-time validation.
+- **Live Monitoring**: Track active scans and resource usage.
+- **Audit Console**: Launch security and architecture scans from a central menu.
+- **History Browser**: View past conversations and export logs.
 
 ### 🧠 The Wire Model
 CodiLay treats every import, function call, and variable reference as a **Wire**. 
@@ -92,18 +96,20 @@ Ask questions about your codebase using `codilay chat .`.
 - **Memory**: The agent remembers your preferences and facts about the codebase across sessions.
 - **Promote to Doc**: Found a great explanation in chat? Use `/promote` to turn the AI's answer into a permanent section of your documentation.
 
-### 🌐 Web Documentation Browser
-The Web UI isn't just a reader—it's an interactive intelligence layer.
-- **Layer 1: The Reader**: High-fidelity rendering of your sections and graph.
-- **Layer 2: The Chatbot**: Quick Q&A from documented context.
-- **Layer 3: The Deep Agent**: Reaches into source code to verify facts.
-
 ```bash
 codilay serve .
 ```
 
-### 👁 Watch Mode
-Run CodiLay in the background and automatically update documentation when files change. Uses filesystem events (via watchdog) with configurable debouncing to avoid redundant re-runs.
+- **Layer 1: The Reader**: High-fidelity rendering of your sections and graph.
+- **Layer 2: The Chatbot**: Quick Q&A from documented context.
+- **Layer 3: The Deep Agent**: Reaches into source code to verify facts.
+- **Layer 4: Audit Lab**: Browse past audit reports and run new ones directly from the web interface.
+
+### 👁 Watch Mode & Real-time Progress
+Run CodiLay in the background and automatically update documentation when files change. 
+- **Debounced Watcher**: Uses filesystem events (via watchdog) to auto-update on save.
+- **Real-time Progress Display**: High-resolution progress bars for file processing, triage, and LLM calls.
+- **Eager Resolution**: Wires are closed the moment a file is processed, giving you instant graph feedback.
 
 ```bash
 # Watch the current directory, auto-update on save
@@ -331,8 +337,14 @@ codilay schedule stop .
 codilay schedule disable .
 ```
 
-### 🛡️ System Audits
-Run AI-powered audits against your architecture, security, performance, and code quality. Passive mode uses existing context (fast), while active mode deeply inspects files (thorough). Supports 48 different types of audits.
+### 🛡️ System Audits (Architecture & Security)
+Run AI-powered audits against your architecture, security, performance, and code quality. Passive mode uses existing context (fast), while active mode deeply inspects files (thorough). 
+
+CodiLay supports **60+ different audit types**, including:
+- **Security**: XSS, Auth flows, Secrets, Crypto, Container/Cloud security, Pentest.
+- **Architecture**: Scalability, Caching, DB Efficiency, API Boundaries.
+- **Quality**: Readability, Chaos Engineering, Reliability, SEO.
+- **Compliance**: GDPR, License violations, Data Governance.
 
 ```bash
 # Run a passive security audit
@@ -340,9 +352,8 @@ codilay audit . --type security --mode passive
 
 # Run an active architecture audit
 codilay audit . --type architecture --mode active
-
-# Audits can also be run from the Interactive Menu or Web UI
 ```
+Audits can be managed and viewed from the **CLI**, the **Interactive Menu**, or the **Web UI**.
 
 ---
 
@@ -350,7 +361,7 @@ codilay audit . --type architecture --mode active
 
 | Command | Action |
 |:---|:---|
-| `codilay` | Launch the **Interactive Menu** |
+| `codilay` | Launch the **Interactive Control Center** |
 | `codilay .` | Document the current directory (incremental) |
 | `codilay chat .` | Start a **Chat session** about the project |
 | `codilay serve .` | Launch the **Web UI** |
@@ -368,7 +379,7 @@ codilay audit . --type architecture --mode active
 | `codilay team` | Manage shared team knowledge (facts/decisions/conventions) |
 | `codilay search . "query"` | Full-text search across all past conversations |
 | `codilay schedule` | Configure and run scheduled doc updates (set/start/stop) |
-| `codilay audit .` | Run an automated codebase audit (48 types) |
+| `codilay audit .` | Run automated codebase audits (60+ types) |
 
 ---
 
