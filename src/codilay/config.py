@@ -16,7 +16,7 @@ class CodiLayConfig:
     llm_model: Optional[str] = None  # None = use provider default
     llm_provider: str = "anthropic"
     llm_base_url: Optional[str] = None  # Override provider's default base URL
-    max_tokens_per_call: int = 4096
+    max_tokens_per_call: int = 8192
     max_file_size: int = 50000
     skip_binary: bool = True
     skip_generated: List[str] = field(

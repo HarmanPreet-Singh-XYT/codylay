@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Dict
@@ -339,6 +340,10 @@ class LLMClient:
     # ── JSON parsing ───────────────────────────────────────────────
 
     def _parse_json(self, text: str) -> Dict[str, Any]:
+        # Strip thinking blocks which often contain invalid JSON or brackets
+        pattern = r"(?is)<(?:think|thinking|thought|reasoning)>.*?</(?:think|thinking|thought|reasoning)>"
+        text = re.sub(pattern, "", text).strip()
+
         # Handle markdown fences that might not be at the very start/end
         text = text.strip()
 
@@ -374,43 +379,52 @@ class LLMClient:
             return {"error": "LLM returned non-object JSON", "raw_value": parsed}
 
     def _salvage_json(self, text: str) -> Dict[str, Any]:
+        pattern = r"(?is)<(?:think|thinking|thought|reasoning)>.*?</(?:think|thinking|thought|reasoning)>"
+        text = re.sub(pattern, "", text).strip()
         text = text.strip()
-        start = text.find("{")
-        if start == -1:
+
+        brace_starts = [m.start() for m in re.finditer(r"\{", text)]
+        if not brace_starts:
             return {"error": "Failed to parse LLM response (no start brace)", "raw_response": text[:1000]}
 
-        end = text.rfind("}")
+        candidates_parsed = []
 
-        # Strategy 1: Classic substring or take all if no end brace
-        if end != -1 and end > start:
-            candidates = [text[start : end + 1], text[start:]]
-        else:
-            candidates = [text[start:]]
-
-        for candidate in candidates:
+        # Parse starting from every brace. Save valid outputs along with string block length.
+        for start_idx in brace_starts:
+            candidate = text[start_idx:]
             try:
                 parsed = json.loads(candidate)
                 if isinstance(parsed, dict):
-                    return parsed
+                    candidates_parsed.append((len(candidate), parsed))
+                    continue
             except json.JSONDecodeError as e:
                 # Strategy 2: Handle extra data after valid object
                 if "Extra data" in str(e):
                     try:
-                        parsed = json.loads(candidate[: e.pos].strip())
+                        valid_str = candidate[: e.pos].strip()
+                        parsed = json.loads(valid_str)
                         if isinstance(parsed, dict):
-                            return parsed
+                            candidates_parsed.append((len(valid_str), parsed))
+                            continue
                     except Exception:
                         pass
 
                 # Strategy 3: Truncated JSON repair
                 for suffix in ["}", '"', '"}', '"}]}', '"}}', "}}", "]}", "]}"]:
                     try:
-                        parsed = json.loads(candidate + suffix)
+                        valid_str = candidate + suffix
+                        parsed = json.loads(valid_str)
                         if isinstance(parsed, dict):
                             parsed["_repaired"] = True
-                            return parsed
+                            candidates_parsed.append((len(valid_str), parsed))
+                            break
                     except Exception:
                         continue
+
+        if candidates_parsed:
+            # Sort by the length of the matching JSON string to prefer the largest top-level object
+            candidates_parsed.sort(key=lambda x: x[0], reverse=True)
+            return candidates_parsed[0][1]
 
         return {"error": "Failed to parse LLM response", "raw_response": text[:1000]}
 
