@@ -156,6 +156,10 @@ class LLMClient:
         self.max_tokens = config.max_tokens_per_call
         self._sdk_type = pcfg["sdk"]  # "anthropic" or "openai"
 
+        # Reasoning / extended thinking settings (applied when use_thinking=True)
+        self.thinking_budget = getattr(config, "thinking_budget_tokens", None)
+        self.reasoning_effort = getattr(config, "reasoning_effort", None)
+
         # ── Build SDK client ───────────────────────────────────────
         if self._sdk_type == "anthropic":
             self._init_anthropic(pcfg)
@@ -232,11 +236,14 @@ class LLMClient:
         user_prompt: str,
         retries: int = 3,
         json_mode: bool = True,
+        use_thinking: bool = False,
     ) -> Dict[str, Any]:
         raw = ""
         for attempt in range(retries):
             try:
-                raw = self._raw_call_with_rate_limit(system_prompt, user_prompt, json_mode=json_mode)
+                raw = self._raw_call_with_rate_limit(
+                    system_prompt, user_prompt, json_mode=json_mode, use_thinking=use_thinking
+                )
                 self.call_count += 1
                 if not json_mode:
                     return {"answer": raw}
@@ -254,14 +261,16 @@ class LLMClient:
 
     # ── Rate-limit wrapper ─────────────────────────────────────────
 
-    def _raw_call_with_rate_limit(self, system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
+    def _raw_call_with_rate_limit(
+        self, system_prompt: str, user_prompt: str, json_mode: bool = False, use_thinking: bool = False
+    ) -> str:
         """Call _raw_call with automatic retry on 429 rate-limit errors."""
         anthropic_err, openai_err = _get_rate_limit_errors()
         rate_limit_errors = (anthropic_err, openai_err)
 
         for rate_attempt in range(self.RATE_LIMIT_MAX_RETRIES):
             try:
-                return self._raw_call(system_prompt, user_prompt, json_mode=json_mode)
+                return self._raw_call(system_prompt, user_prompt, json_mode=json_mode, use_thinking=use_thinking)
             except rate_limit_errors as exc:
                 if rate_attempt >= self.RATE_LIMIT_MAX_RETRIES - 1:
                     raise
@@ -281,40 +290,65 @@ class LLMClient:
                 )
                 time.sleep(wait)
 
-        return self._raw_call(system_prompt, user_prompt, json_mode=json_mode)
+        return self._raw_call(system_prompt, user_prompt, json_mode=json_mode, use_thinking=use_thinking)
 
     # ── Raw API call (routes to correct SDK) ───────────────────────
 
-    def _raw_call(self, system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
+    def _raw_call(
+        self, system_prompt: str, user_prompt: str, json_mode: bool = False, use_thinking: bool = False
+    ) -> str:
         if self._sdk_type == "anthropic":
-            return self._call_anthropic(system_prompt, user_prompt)
+            return self._call_anthropic(system_prompt, user_prompt, use_thinking=use_thinking)
         else:
-            return self._call_openai(system_prompt, user_prompt, json_mode=json_mode)
+            return self._call_openai(system_prompt, user_prompt, json_mode=json_mode, use_thinking=use_thinking)
 
-    def _call_anthropic(self, system_prompt: str, user_prompt: str) -> str:
+    def _call_anthropic(self, system_prompt: str, user_prompt: str, use_thinking: bool = False) -> str:
         # Anthropic doesn't have a specific 'json_mode' toggle like OpenAI,
         # it relies on the prompt.
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            timeout=60.0,
-        )
-        self.total_input_tokens += response.usage.input_tokens
-        self.total_output_tokens += response.usage.output_tokens
-        return response.content[0].text
-
-    def _call_openai(self, system_prompt: str, user_prompt: str, json_mode: bool = False) -> str:
-        kwargs = {
+        kwargs: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+            "timeout": 60.0,
+        }
+
+        if use_thinking and self.thinking_budget:
+            # Extended thinking requires betas header and budget_tokens
+            # Temperature must not be set (defaults to 1 when thinking is active)
+            kwargs["thinking"] = {"type": "enabled", "budget_tokens": self.thinking_budget}
+            kwargs["betas"] = ["interleaved-thinking-2025-05-14"]
+
+        response = self.client.messages.create(**kwargs)
+        self.total_input_tokens += response.usage.input_tokens
+        self.total_output_tokens += response.usage.output_tokens
+
+        # Extract text-type content blocks only (skip thinking blocks)
+        text_parts = []
+        for block in response.content:
+            if getattr(block, "type", None) == "text":
+                text_parts.append(block.text)
+        return "\n".join(text_parts) if text_parts else ""
+
+    def _call_openai(
+        self, system_prompt: str, user_prompt: str, json_mode: bool = False, use_thinking: bool = False
+    ) -> str:
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "timeout": 60.0,
         }
+
+        # o-series reasoning models use reasoning_effort + max_completion_tokens
+        effort = self.reasoning_effort if use_thinking else None
+        if effort:
+            kwargs["reasoning_effort"] = effort
+            kwargs["max_completion_tokens"] = self.max_tokens
+        else:
+            kwargs["max_tokens"] = self.max_tokens
 
         if json_mode:
             try:

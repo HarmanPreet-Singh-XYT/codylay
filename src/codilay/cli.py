@@ -232,6 +232,11 @@ def run(ctx, target, scope):
     cfg.detail_level = settings.detail_level
     cfg.include_examples = settings.include_examples
 
+    # Apply reasoning preferences from global settings
+    if settings.reasoning_enabled:
+        cfg.thinking_budget_tokens = settings.reasoning_budget_tokens
+        cfg.reasoning_effort = settings.reasoning_effort
+
     ui.show_config(cfg)
 
     # ── Resolve paths ────────────────────────────────────────────
@@ -3571,3 +3576,142 @@ def audit_command(ctx, target, audit_type, mode):
         )
 
     ui.success(f"Audit complete! Report saved to {result['report_path']}")
+
+
+# ─── Annotate command ──────────────────────────────────────────────────────────
+
+
+@cli.command("annotate")
+@click.argument("target", default=".", type=click.Path(exists=True))
+@click.option(
+    "--scope",
+    "-s",
+    multiple=True,
+    default=None,
+    help="Restrict annotation to specific files or folders. Can be supplied multiple times.",
+)
+@click.option(
+    "--exclude",
+    "-e",
+    multiple=True,
+    default=None,
+    help="Exclude these paths or glob patterns. Can be supplied multiple times.",
+)
+@click.option(
+    "--level",
+    "-l",
+    type=click.Choice(["docstrings", "inline", "full"]),
+    default="docstrings",
+    show_default=True,
+    help="Annotation level: docstrings only, inline only, or both.",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Preview annotations without writing any files.")
+@click.option("--rollback", "rollback_id", default=None, help="Undo a previous annotation run by its run ID.")
+@click.option("--no-git-check", is_flag=True, default=False, help="Skip the git working tree clean check.")
+@click.pass_context
+def annotate(ctx, target, scope, exclude, level, dry_run, rollback_id, no_git_check):
+    """Add documentation comments to source files using CodiLay's wire knowledge.
+
+    \b
+    CodiLay reads each source file and writes language-appropriate docstrings and
+    comments back into the code, enriched with wire connection data (what calls
+    what, what depends on what).
+
+    \b
+    Safety guards (configurable in settings):
+      • Requires a clean git working tree (use --no-git-check to bypass)
+      • --dry-run shows a preview diff without touching any files
+      • Backups are saved for rollback: codilay annotate . --rollback <run-id>
+
+    \b
+    Examples:
+        codilay annotate .                       Annotate whole project
+        codilay annotate . --dry-run             Preview only
+        codilay annotate . --scope src/auth/     Annotate one folder
+        codilay annotate . --level full          Docstrings + inline
+        codilay annotate . --rollback 20240314_120000  Undo a run
+    """
+    from codilay.annotator import Annotator, check_git_clean
+    from codilay.scanner import Scanner
+    from codilay.state import AgentState
+    from codilay.ui import UI
+
+    target = os.path.abspath(target)
+    settings: Settings = ctx.obj["settings"]
+    config_path = ctx.obj.get("config_path")
+    output_dir = ctx.obj.get("output") or os.path.join(target, "codilay")
+
+    ui = UI(console, ctx.obj.get("verbose", False))
+    ui.show_banner()
+
+    cfg = CodiLayConfig.load(target, config_path)
+    provider = ctx.obj.get("provider") or settings.default_provider
+    model_override = ctx.obj.get("model")
+    base_url = ctx.obj.get("base_url")
+
+    if provider:
+        cfg.llm_provider = provider
+    if model_override:
+        cfg.llm_model = model_override
+    if base_url:
+        cfg.llm_base_url = base_url
+
+    # Apply reasoning settings
+    if settings.reasoning_enabled:
+        cfg.thinking_budget_tokens = settings.reasoning_budget_tokens
+        cfg.reasoning_effort = settings.reasoning_effort
+
+    # ── Rollback mode ─────────────────────────────────────────────
+    if rollback_id:
+        llm = LLMClient(cfg)
+        annotator = Annotator(llm, settings, ui, target, output_dir)
+        annotator.rollback(rollback_id)
+        return
+
+    # ── Git clean check ───────────────────────────────────────────
+    if settings.annotate_require_git_clean and not no_git_check and not dry_run:
+        is_clean, status_msg = check_git_clean(target)
+        if not is_clean:
+            ui.error(
+                f"Working tree is not clean ({status_msg}).\n"
+                "Commit or stash your changes before annotating, or use --no-git-check to bypass.\n"
+                "Without a clean tree you cannot easily undo CodiLay's annotations."
+            )
+            return
+
+    # ── Load state for wire data ──────────────────────────────────
+    state_path = os.path.join(output_dir, ".codilay_state.json")
+    closed_wires = []
+    section_contents = {}
+    if os.path.exists(state_path):
+        state = AgentState.load(state_path)
+        closed_wires = state.closed_wires
+        section_contents = state.section_contents
+        ui.info(f"Loaded wire data: {len(closed_wires)} closed wires")
+    else:
+        ui.warn("No CodiLay state found — wire connections won't be included in annotations. Run 'codilay .' first.")
+
+    # ── Scan files ────────────────────────────────────────────────
+    scanner = Scanner(target, cfg, output_dir=output_dir)
+    all_files = scanner.get_all_files()
+
+    if not all_files:
+        ui.error("No files found in target directory.")
+        return
+
+    scope_list = list(scope) if scope else []
+    exclude_list = list(exclude) if exclude else []
+
+    # ── Run annotation ────────────────────────────────────────────
+    llm = LLMClient(cfg)
+    annotator = Annotator(llm, settings, ui, target, output_dir)
+
+    annotator.run(
+        files=all_files,
+        level=level,
+        dry_run=dry_run,
+        scope=scope_list or None,
+        exclude=exclude_list or None,
+        wire_data=closed_wires,
+        section_contents=section_contents,
+    )

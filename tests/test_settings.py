@@ -5,7 +5,7 @@ import os
 import tempfile
 from unittest.mock import patch
 
-from codilay.settings import DEFAULT_MODELS, PROVIDER_META, Settings
+from codilay.settings import DEFAULT_MODELS, PROVIDER_META, PROVIDER_MODELS, Settings
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -273,3 +273,124 @@ def test_is_first_run_false_when_file_exists():
         with patch("codilay.settings.SETTINGS_FILE", __import__("pathlib").Path(settings_file)):
             s = Settings()
             assert s.is_first_run() is False
+
+
+# ── PROVIDER_MODELS ───────────────────────────────────────────────────────────
+
+
+def test_provider_models_covers_all_providers():
+    """Every provider in PROVIDER_META should have an entry in PROVIDER_MODELS."""
+    for provider in PROVIDER_META:
+        assert provider in PROVIDER_MODELS, f"Missing PROVIDER_MODELS entry for '{provider}'"
+
+
+def test_provider_models_structure():
+    """Each non-empty preset list must contain dicts with id, desc, and reasoning keys."""
+    for provider, models in PROVIDER_MODELS.items():
+        for m in models:
+            assert "id" in m, f"{provider}: model entry missing 'id'"
+            assert "desc" in m, f"{provider}: model entry missing 'desc'"
+            assert "reasoning" in m, f"{provider}: model entry missing 'reasoning'"
+            assert isinstance(m["reasoning"], bool), f"{provider}: 'reasoning' must be bool"
+            assert isinstance(m["id"], str) and m["id"], f"{provider}: 'id' must be non-empty string"
+
+
+def test_provider_models_default_in_list():
+    """The DEFAULT_MODELS entry for each provider should appear in its preset list (where presets exist)."""
+    for provider, models in PROVIDER_MODELS.items():
+        if not models:
+            continue  # ollama/custom have empty lists — fine
+        default = DEFAULT_MODELS.get(provider)
+        if default is None:
+            continue
+        ids = [m["id"] for m in models]
+        assert default in ids, f"{provider}: default model '{default}' not found in PROVIDER_MODELS presets"
+
+
+def test_reasoning_models_marked():
+    """At least one model per major provider should be marked as supporting reasoning."""
+    reasoning_providers = {"anthropic", "openai", "gemini", "deepseek", "xai"}
+    for provider in reasoning_providers:
+        models = PROVIDER_MODELS.get(provider, [])
+        has_reasoning = any(m["reasoning"] for m in models)
+        assert has_reasoning, f"{provider}: expected at least one reasoning-capable model"
+
+
+# ── Reasoning settings defaults ───────────────────────────────────────────────
+
+
+def test_reasoning_settings_defaults():
+    s = Settings()
+    assert s.reasoning_enabled is False
+    assert s.reasoning_budget_tokens == 10000
+    assert s.reasoning_effort == "medium"
+    assert s.reasoning_apply_to == ["processing", "planning"]
+
+
+def test_reasoning_settings_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        settings_dir = os.path.join(tmp, ".codilay")
+        settings_file = os.path.join(settings_dir, "settings.json")
+
+        with (
+            patch("codilay.settings.SETTINGS_DIR", __import__("pathlib").Path(settings_dir)),
+            patch("codilay.settings.SETTINGS_FILE", __import__("pathlib").Path(settings_file)),
+        ):
+            s = Settings()
+            s.reasoning_enabled = True
+            s.reasoning_budget_tokens = 20000
+            s.reasoning_effort = "high"
+            s.reasoning_apply_to = ["processing"]
+            s.save()
+
+            loaded = Settings.load()
+
+        assert loaded.reasoning_enabled is True
+        assert loaded.reasoning_budget_tokens == 20000
+        assert loaded.reasoning_effort == "high"
+        assert loaded.reasoning_apply_to == ["processing"]
+
+
+# ── Annotation settings defaults ──────────────────────────────────────────────
+
+
+def test_annotation_settings_defaults():
+    s = Settings()
+    assert s.annotate_require_git_clean is True
+    assert s.annotate_require_dry_run_first is True
+    assert s.annotate_auto_commit is False
+    assert s.annotate_commit_message == "docs: add CodiLay annotations"
+    assert s.annotate_level == "docstrings"
+    assert s.annotate_skip_existing is True
+    assert s.annotate_skip_tests is True
+    assert s.annotate_skip_short_functions is True
+    assert s.annotate_short_function_threshold == 5
+    assert s.annotate_confidence_threshold == 0.7
+    assert s.annotate_review_mode is False
+    assert s.annotate_syntax_validation is True
+
+
+def test_annotation_settings_round_trip():
+    with tempfile.TemporaryDirectory() as tmp:
+        settings_dir = os.path.join(tmp, ".codilay")
+        settings_file = os.path.join(settings_dir, "settings.json")
+
+        with (
+            patch("codilay.settings.SETTINGS_DIR", __import__("pathlib").Path(settings_dir)),
+            patch("codilay.settings.SETTINGS_FILE", __import__("pathlib").Path(settings_file)),
+        ):
+            s = Settings()
+            s.annotate_require_git_clean = False
+            s.annotate_auto_commit = True
+            s.annotate_level = "full"
+            s.annotate_confidence_threshold = 0.5
+            s.annotate_short_function_threshold = 10
+            s.save()
+
+            loaded = Settings.load()
+
+        assert loaded.annotate_require_git_clean is False
+        assert loaded.annotate_auto_commit is True
+        assert loaded.annotate_level == "full"
+        assert loaded.annotate_confidence_threshold == 0.5
+        assert loaded.annotate_short_function_threshold == 10

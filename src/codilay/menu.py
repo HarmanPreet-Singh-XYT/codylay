@@ -17,6 +17,7 @@ from rich.table import Table
 from codilay.settings import (
     DEFAULT_MODELS,
     PROVIDER_META,
+    PROVIDER_MODELS,
     SETTINGS_FILE,
     Settings,
 )
@@ -501,20 +502,70 @@ def _menu_provider_model(settings: Settings):
     chosen = providers[idx - 1]
     settings.default_provider = chosen
 
-    # Model
-    default_m = DEFAULT_MODELS.get(chosen, "")
-    current_m = settings.default_model if settings.default_model else default_m
-    console.print(f"\n  Current model: [bold]{current_m}[/bold]")
-    new_model = Prompt.ask("  New model [dim](Enter to keep, 0 to cancel)[/dim]", default="")
+    # ── Model selection — show preset list if available ────────────
+    preset_models = PROVIDER_MODELS.get(chosen, [])
+    if preset_models:
+        console.print()
+        console.print("  [bold]Select model:[/bold]  [dim](✦ = supports reasoning / extended thinking)[/dim]\n")
 
-    if _is_back(new_model):
-        # Revert provider change since user cancelled
-        return
+        current_m = settings.default_model or DEFAULT_MODELS.get(chosen, "")
 
-    if new_model:
-        settings.default_model = new_model
+        model_table = Table(show_header=False, box=None, padding=(0, 2))
+        model_table.add_column("#", style="bold cyan", width=5, justify="right")
+        model_table.add_column("model_id", style="bold")
+        model_table.add_column("desc", style="dim")
+
+        for i, m in enumerate(preset_models, 1):
+            reasoning_marker = " [bold yellow]✦[/bold yellow]" if m["reasoning"] else ""
+            current_marker = "  [bold yellow]← current[/bold yellow]" if m["id"] == current_m else ""
+            model_table.add_row(f"[{i}]", f"{m['id']}{reasoning_marker}{current_marker}", m["desc"])
+
+        custom_idx = len(preset_models) + 1
+        model_table.add_row(f"[{custom_idx}]", "Enter custom model name...", "")
+
+        console.print(model_table)
+        console.print()
+
+        # Find default selection
+        default_model_idx = custom_idx
+        for i, m in enumerate(preset_models, 1):
+            if m["id"] == current_m:
+                default_model_idx = i
+                break
+
+        model_choice = _int_prompt_with_back(
+            "Select model [dim](0 to go back)[/dim]",
+            low=1,
+            high=custom_idx,
+            default=default_model_idx,
+        )
+        if model_choice is None:
+            return
+
+        if model_choice == custom_idx:
+            # Custom model name
+            custom_model = Prompt.ask("  Model name [dim](0 to cancel)[/dim]", default="")
+            if _is_back(custom_model) or not custom_model:
+                return
+            settings.default_model = custom_model
+            selected_model_info = None
+        else:
+            selected = preset_models[model_choice - 1]
+            settings.default_model = selected["id"]
+            selected_model_info = selected
     else:
-        settings.default_model = None  # use provider default
+        # No presets (Ollama / custom) — free-form entry
+        selected_model_info = None
+        default_m = DEFAULT_MODELS.get(chosen, "")
+        current_m = settings.default_model if settings.default_model else default_m
+        console.print(f"\n  Current model: [bold]{current_m}[/bold]")
+        new_model = Prompt.ask("  Model name [dim](Enter to keep current, 0 to cancel)[/dim]", default="")
+        if _is_back(new_model):
+            return
+        if new_model:
+            settings.default_model = new_model
+        else:
+            settings.default_model = None
 
     # Custom base URL for 'custom' provider
     if chosen == "custom":
@@ -533,8 +584,11 @@ def _menu_provider_model(settings: Settings):
     settings.save()
 
     final_model = settings.get_effective_model()
+    reasoning_note = ""
+    if selected_model_info and selected_model_info.get("reasoning"):
+        reasoning_note = "  [dim](✦ supports reasoning — configure in Preferences → LLM & API)[/dim]"
     console.print(
-        f"\n[green]✓[/green] Provider: [bold]{PROVIDER_META[chosen]['label']}[/bold]  Model: [bold]{final_model}[/bold]"
+        f"\n[green]✓[/green] Provider: [bold]{PROVIDER_META[chosen]['label']}[/bold]  Model: [bold]{final_model}[/bold]{reasoning_note}"
     )
     _pause()
 
@@ -597,17 +651,19 @@ def _prefs_llm(settings: Settings):
         _clear()
         _header("Preferences · LLM & API")
 
+        reasoning_status = "[green]enabled[/green]" if settings.reasoning_enabled else "[dim]disabled[/dim]"
         console.print("[bold]Current settings:[/bold]\n")
         console.print(f"  [bold cyan][1][/bold cyan] Max tokens per call:  [bold]{settings.max_tokens_per_call}[/bold]")
         console.print(
             f"  [bold cyan][2][/bold cyan] Parallel processing:  [bold]{'Yes' if settings.parallel else 'No'}[/bold]"
         )
         console.print(f"  [bold cyan][3][/bold cyan] Max parallel workers: [bold]{settings.max_workers}[/bold]")
+        console.print(f"  [bold cyan][4][/bold cyan] Reasoning / thinking: {reasoning_status}")
         console.print()
         console.print("  [bold cyan][0][/bold cyan] ← Back")
         console.print()
 
-        choice = Prompt.ask("Which setting?", choices=["0", "1", "2", "3"], default="0")
+        choice = Prompt.ask("Which setting?", choices=["0", "1", "2", "3", "4"], default="0")
 
         if choice == "0":
             return
@@ -649,6 +705,92 @@ def _prefs_llm(settings: Settings):
                 console.print(f"\n[green]✓[/green] Max workers: [bold]{settings.max_workers}[/bold]")
             except ValueError:
                 console.print("[yellow]Invalid number[/yellow]")
+            _pause()
+
+        elif choice == "4":
+            _prefs_reasoning(settings)
+
+
+def _prefs_reasoning(settings: Settings):
+    """Reasoning / extended thinking preferences."""
+    while True:
+        _clear()
+        _header("Preferences · Reasoning / Extended Thinking")
+        console.print(
+            "  [dim]Enable extended thinking for supported models (✦).\n"
+            "  Anthropic: uses extended thinking with a token budget.\n"
+            "  OpenAI o-series: uses reasoning_effort (low / medium / high).[/dim]\n"
+        )
+
+        enabled_str = "[green]Yes[/green]" if settings.reasoning_enabled else "[dim]No[/dim]"
+        apply_str = ", ".join(settings.reasoning_apply_to) if settings.reasoning_apply_to else "none"
+        console.print(f"  [bold cyan][1][/bold cyan] Reasoning enabled:    {enabled_str}")
+        console.print(
+            f"  [bold cyan][2][/bold cyan] Anthropic budget:     [bold]{settings.reasoning_budget_tokens:,}[/bold] tokens"
+        )
+        console.print(
+            f"  [bold cyan][3][/bold cyan] OpenAI effort level:  [bold]{settings.reasoning_effort}[/bold]  [dim](low | medium | high)[/dim]"
+        )
+        console.print(f"  [bold cyan][4][/bold cyan] Apply reasoning to:   [bold]{apply_str}[/bold]")
+        console.print()
+        console.print("  [bold cyan][0][/bold cyan] ← Back")
+        console.print()
+
+        choice = Prompt.ask("Which setting?", choices=["0", "1", "2", "3", "4"], default="0")
+
+        if choice == "0":
+            return
+
+        elif choice == "1":
+            settings.reasoning_enabled = not settings.reasoning_enabled
+            settings.save()
+            state = "ON" if settings.reasoning_enabled else "OFF"
+            console.print(f"\n[green]✓[/green] Reasoning: [bold]{state}[/bold]")
+            _pause()
+
+        elif choice == "2":
+            raw = Prompt.ask(
+                f"  Anthropic thinking budget tokens [dim](currently {settings.reasoning_budget_tokens:,}, 0 to cancel)[/dim]",
+                default=str(settings.reasoning_budget_tokens),
+            )
+            if _is_back(raw):
+                continue
+            try:
+                budget = int(raw)
+                settings.reasoning_budget_tokens = max(1024, min(budget, 100_000))
+                settings.save()
+                console.print(f"\n[green]✓[/green] Budget: [bold]{settings.reasoning_budget_tokens:,}[/bold] tokens")
+            except ValueError:
+                console.print("[yellow]Invalid number[/yellow]")
+            _pause()
+
+        elif choice == "3":
+            effort_choice = Prompt.ask(
+                "  OpenAI reasoning effort",
+                choices=["low", "medium", "high"],
+                default=settings.reasoning_effort,
+            )
+            settings.reasoning_effort = effort_choice
+            settings.save()
+            console.print(f"\n[green]✓[/green] Reasoning effort: [bold]{settings.reasoning_effort}[/bold]")
+            _pause()
+
+        elif choice == "4":
+            console.print("\n  Operations that can use reasoning:")
+            console.print("    [bold]processing[/bold]  — main file documentation pass")
+            console.print("    [bold]planning[/bold]    — processing order determination")
+            console.print("    [bold]deep_agent[/bold]  — deep agent chat queries")
+            console.print()
+            console.print(f"  Currently: [bold]{', '.join(settings.reasoning_apply_to) or 'none'}[/bold]")
+            console.print("  Enter comma-separated list (e.g. processing,planning)  or 0 to cancel\n")
+            raw = Prompt.ask("  Apply to", default=",".join(settings.reasoning_apply_to))
+            if _is_back(raw):
+                continue
+            valid_ops = {"processing", "planning", "deep_agent"}
+            chosen_ops = [op.strip() for op in raw.split(",") if op.strip() in valid_ops]
+            settings.reasoning_apply_to = chosen_ops
+            settings.save()
+            console.print(f"\n[green]✓[/green] Apply reasoning to: [bold]{', '.join(chosen_ops) or 'none'}[/bold]")
             _pause()
 
 

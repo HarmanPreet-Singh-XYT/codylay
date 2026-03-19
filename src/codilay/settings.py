@@ -42,7 +42,7 @@ PROVIDER_META = {
 
 # Default models per provider
 DEFAULT_MODELS = {
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o",
     "gemini": "gemini-2.0-flash",
     "deepseek": "deepseek-chat",
@@ -52,6 +52,52 @@ DEFAULT_MODELS = {
     "llama": "Llama-4-Maverick-17B-128E",
     "ollama": "llama3.2",
     "custom": None,
+}
+
+# Preset model list per provider — {"id": model_id, "desc": description, "reasoning": bool}
+# reasoning=True marks models that support extended thinking / reasoning mode
+PROVIDER_MODELS = {
+    "anthropic": [
+        {"id": "claude-opus-4-6", "desc": "Most capable, highest cost", "reasoning": True},
+        {"id": "claude-sonnet-4-6", "desc": "Balanced (recommended)", "reasoning": True},
+        {"id": "claude-haiku-4-5-20251001", "desc": "Fastest, lowest cost", "reasoning": False},
+        {"id": "claude-sonnet-4-20250514", "desc": "Previous generation Sonnet", "reasoning": False},
+    ],
+    "openai": [
+        {"id": "gpt-4o", "desc": "Flagship multimodal", "reasoning": False},
+        {"id": "gpt-4o-mini", "desc": "Fast, low cost", "reasoning": False},
+        {"id": "o3", "desc": "Reasoning model", "reasoning": True},
+        {"id": "o4-mini", "desc": "Reasoning, low cost", "reasoning": True},
+    ],
+    "gemini": [
+        {"id": "gemini-2.0-flash", "desc": "Fast", "reasoning": False},
+        {"id": "gemini-2.5-pro-preview-03-25", "desc": "Most capable", "reasoning": True},
+        {"id": "gemini-2.0-flash-thinking-exp", "desc": "Reasoning", "reasoning": True},
+    ],
+    "deepseek": [
+        {"id": "deepseek-chat", "desc": "Standard chat", "reasoning": False},
+        {"id": "deepseek-reasoner", "desc": "Reasoning model", "reasoning": True},
+    ],
+    "mistral": [
+        {"id": "mistral-large-latest", "desc": "Most capable", "reasoning": False},
+        {"id": "mistral-small-latest", "desc": "Fast, low cost", "reasoning": False},
+        {"id": "codestral-latest", "desc": "Code-optimized", "reasoning": False},
+    ],
+    "groq": [
+        {"id": "llama-3.3-70b-versatile", "desc": "Large, versatile", "reasoning": False},
+        {"id": "llama-3.1-8b-instant", "desc": "Fast, low cost", "reasoning": False},
+        {"id": "gemma2-9b-it", "desc": "Google Gemma 2", "reasoning": False},
+    ],
+    "xai": [
+        {"id": "grok-2-latest", "desc": "Most capable", "reasoning": False},
+        {"id": "grok-3-mini-beta", "desc": "Reasoning, efficient", "reasoning": True},
+    ],
+    "llama": [
+        {"id": "Llama-4-Maverick-17B-128E", "desc": "Most capable", "reasoning": False},
+        {"id": "Llama-4-Scout-17B-16E", "desc": "Faster, efficient", "reasoning": False},
+    ],
+    "ollama": [],  # Dynamic — user enters model name
+    "custom": [],  # Always custom
 }
 
 
@@ -120,6 +166,30 @@ class Settings:
     # Large file handling — token threshold above which chunking kicks in.
     # None means use the per-project config / built-in default (6000).
     large_file_threshold: Optional[int] = None
+
+    # Reasoning / extended thinking
+    # reasoning_enabled: activates thinking mode for supported models
+    # reasoning_budget_tokens: token budget for Anthropic extended thinking
+    # reasoning_effort: effort level for OpenAI o-series (low | medium | high)
+    # reasoning_apply_to: which operations get thinking (processing, planning, deep_agent)
+    reasoning_enabled: bool = False
+    reasoning_budget_tokens: int = 10000
+    reasoning_effort: str = "medium"
+    reasoning_apply_to: List[str] = field(default_factory=lambda: ["processing", "planning"])
+
+    # Code annotation settings
+    annotate_require_git_clean: bool = True
+    annotate_require_dry_run_first: bool = True
+    annotate_auto_commit: bool = False
+    annotate_commit_message: str = "docs: add CodiLay annotations"
+    annotate_level: str = "docstrings"  # docstrings | inline | full
+    annotate_skip_existing: bool = True
+    annotate_skip_tests: bool = True
+    annotate_skip_short_functions: bool = True
+    annotate_short_function_threshold: int = 5
+    annotate_confidence_threshold: float = 0.7
+    annotate_review_mode: bool = False
+    annotate_syntax_validation: bool = True
 
     # ── persistence ───────────────────────────────────────────────
 

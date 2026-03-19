@@ -337,6 +337,63 @@ codilay schedule stop .
 codilay schedule disable .
 ```
 
+### ✍️ Code Annotation
+Write documentation back into your source files — not just into `CODEBASE.md`. CodiLay uses its wire knowledge to annotate every function with what calls it, what it calls, and why it exists.
+
+```bash
+# Preview what would be added (no writes)
+codilay annotate . --dry-run
+
+# Annotate the whole project (docstrings only)
+codilay annotate .
+
+# Annotate a specific folder with full inline comments
+codilay annotate . --scope src/payments/ --level full
+
+# Annotate with JSDoc / GoDoc / DartDoc / Rust doc comments too
+codilay annotate . --scope src/api/
+
+# Undo a previous annotation run
+codilay annotate . --rollback 20240314_120000
+```
+
+**Annotation levels:**
+
+| Level | What gets added |
+|:---|:---|
+| `docstrings` | Function/class docstrings only (default) |
+| `inline` | Inline comments on non-obvious lines only |
+| `full` | Both docstrings and inline comments |
+
+**Language-aware comment styles:**
+- Python → `"""triple-quoted docstrings"""`
+- JavaScript / TypeScript → `/** JSDoc */`
+- Go → `// GoDoc above functions`
+- Rust → `/// triple-slash doc comments`
+- Dart → `/// DartDoc comments`
+- Java / Kotlin / C# → `/** Javadoc */`
+
+**Wire connection block** (unique to CodiLay — no other tool writes this):
+```python
+def process_payment(order_id, retry_count=0):
+    """
+    Charges the customer for a pending order via Stripe.
+
+    Wire connections:
+      ← Called by: routes/orders.py, scheduler/retry_jobs.py
+      → Calls:     stripe.charge.create, notify_fulfillment (async)
+      → Reads:     Order, Customer (models)
+
+    Retry logic: up to 3 attempts with exponential backoff (60s, 120s, 180s).
+    """
+```
+
+**Safety guards** (all configurable in global settings):
+- Requires a clean git working tree by default — easy rollback with `git checkout .`
+- `--dry-run` always available before committing to writes
+- Per-file syntax validation (Python `ast.parse`) before any write
+- Automatic backup to `codilay/annotation_history/` for rollback without git
+
 ### 🛡️ System Audits (Architecture & Security)
 Run AI-powered audits against your architecture, security, performance, and code quality. Passive mode uses existing context (fast), while active mode deeply inspects files (thorough). 
 
@@ -380,6 +437,9 @@ Audits can be managed and viewed from the **CLI**, the **Interactive Menu**, or 
 | `codilay search . "query"` | Full-text search across all past conversations |
 | `codilay schedule` | Configure and run scheduled doc updates (set/start/stop) |
 | `codilay audit .` | Run automated codebase audits (60+ types) |
+| `codilay annotate .` | Write docstrings and wire comments back into source files |
+| `codilay annotate . --dry-run` | Preview annotations without writing |
+| `codilay annotate . --rollback <id>` | Undo a previous annotation run |
 
 ---
 
@@ -442,10 +502,17 @@ Place a `codilay.config.json` in your root for project-specific behavior:
 
 ### 🌍 Multi-Provider Support
 CodiLay is provider-agnostic. Power it with:
-- **Cloud**: Anthropic (Sonnet/Haiku), OpenAI (GPT-4o), Google Gemini.
-- **Local**: Ollama, Groq, Llama Cloud.
-- **Specialty**: DeepSeek, Mistral.
+- **Cloud**: Anthropic (claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5), OpenAI (gpt-4o, o3, o4-mini), Google Gemini (2.0 Flash, 2.5 Pro).
+- **Local**: Ollama, Groq, Llama Cloud (Llama 4).
+- **Specialty**: DeepSeek (including deepseek-reasoner), Mistral, xAI (Grok).
 - **Custom**: Any OpenAI-compatible endpoint.
+
+**Model presets** — the interactive menu now shows a numbered list of known models per provider rather than a free-form text field. Models that support extended thinking / reasoning are marked with ✦.
+
+**Reasoning / Extended Thinking** — enable deeper analysis for supporting models. Configure via `codilay` → Preferences → LLM & API → Reasoning:
+- **Anthropic** (claude-opus-4-6, claude-sonnet-4-6 ✦): extended thinking with configurable token budget
+- **OpenAI** (o3, o4-mini ✦): reasoning effort (`low` / `medium` / `high`)
+- Choose which operations use reasoning: `processing`, `planning`, `deep_agent`
 
 ---
 
@@ -473,6 +540,7 @@ src/codilay/
 ├── team_memory.py      # Shared team knowledge base
 ├── search.py           # Full-text conversation search (inverted index)
 ├── scheduler.py        # Cron & commit-based auto re-runs
+├── annotator.py        # Code annotation engine (writes docs back into source files)
 └── web/                # Premium Glassmorphic Frontend
 
 vscode-extension/       # VSCode extension for inline doc surfacing

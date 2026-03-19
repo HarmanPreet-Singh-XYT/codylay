@@ -67,6 +67,12 @@ class CodiLayConfig:
     detail_level: str = "standard"
     include_examples: bool = True
 
+    # Reasoning — set at runtime from Settings preferences.
+    # thinking_budget_tokens: Anthropic extended thinking budget (None = disabled)
+    # reasoning_effort: OpenAI o-series effort level (None = not applicable)
+    thinking_budget_tokens: Optional[int] = None
+    reasoning_effort: Optional[str] = None
+
     @classmethod
     def load(cls, target_path: str, config_path: Optional[str] = None) -> "CodiLayConfig":
         config = cls(target_path=target_path)

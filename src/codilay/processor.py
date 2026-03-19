@@ -46,6 +46,8 @@ class Processor:
             token_counter=llm.count_tokens,
             config=config,
         )
+        # Reasoning: active when the LLM has a thinking budget or reasoning effort configured
+        self._use_thinking = bool(getattr(llm, "thinking_budget", None) or getattr(llm, "reasoning_effort", None))
 
     def process_file(self, file_path: str, content: str) -> Optional[Dict[str, Any]]:
         """
@@ -100,7 +102,7 @@ class Processor:
                 section_index=section_index,
             )
 
-        result = self.llm.call(self._sys_prompt, user_prompt)
+        result = self.llm.call(self._sys_prompt, user_prompt, use_thinking=self._use_thinking)
 
         if not result or not isinstance(result, dict) or "error" in result:
             error_msg = result.get("error") if isinstance(result, dict) else "Invalid response type"
@@ -141,7 +143,7 @@ class Processor:
             open_wires=open_wires,
         )
 
-        skeleton_result = self.llm.call(self._sys_prompt, skeleton_user_prompt)
+        skeleton_result = self.llm.call(self._sys_prompt, skeleton_user_prompt, use_thinking=self._use_thinking)
 
         if not skeleton_result or not isinstance(skeleton_result, dict) or "error" in skeleton_result:
             error_msg = skeleton_result.get("error") if isinstance(skeleton_result, dict) else "Invalid response type"
@@ -202,7 +204,7 @@ class Processor:
                 open_wires=relevant_wires,
             )
 
-            detail_result = self.llm.call(self._sys_prompt, detail_user_prompt)
+            detail_result = self.llm.call(self._sys_prompt, detail_user_prompt, use_thinking=self._use_thinking)
 
             if not detail_result or not isinstance(detail_result, dict) or "error" in detail_result:
                 error_msg = detail_result.get("error") if isinstance(detail_result, dict) else "Invalid response type"
@@ -372,7 +374,7 @@ class Processor:
 
         user_prompt = finalize_prompt(file_tree, section_index, open_wires, parked_summaries)
 
-        result = self.llm.call(self._sys_prompt, user_prompt)
+        result = self.llm.call(self._sys_prompt, user_prompt, use_thinking=self._use_thinking)
 
         if not result or not isinstance(result, dict) or "error" in result:
             error_msg = result.get("error") if isinstance(result, dict) else "Invalid response type"

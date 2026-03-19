@@ -726,3 +726,123 @@ Return a JSON object:
 Focus on MEANING and IMPACT, not just listing changes. Explain WHY changes matter.
 
 Respond with ONLY the JSON object."""
+
+
+# ── Annotation prompts ────────────────────────────────────────────────────────
+
+
+def annotation_triage_prompt(file_list: list, language_hints: dict = None) -> str:
+    """Classify files for annotation eligibility — lightweight pre-pass."""
+    hints_str = ""
+    if language_hints:
+        hints_str = "\n\nDetected languages:\n" + "\n".join(
+            f"  {path}: {lang}" for path, lang in language_hints.items()
+        )
+
+    files_str = "\n".join(f"  {f}" for f in file_list)
+    return f"""You are classifying source files for code annotation eligibility.
+
+For each file, decide:
+- ANNOTATE: a code file where adding docstrings/comments would add value
+- SKIP: code file but not a good annotation target (config, migration, seed data, generated code, test fixtures)
+- IGNORE: not a source code file (markdown, JSON data, YAML config, text files, images, etc.)
+
+Rules:
+- Markdown (.md), JSON, YAML, TOML, lock files → always IGNORE
+- Generated files, migration files, seed data → SKIP
+- Test files → SKIP (caller controls this separately)
+- Empty or near-empty files → SKIP
+- Real application source code (Python, JS, TS, Go, Rust, Java, Dart, etc.) → ANNOTATE
+
+Files to classify:
+{files_str}{hints_str}
+
+Respond with ONLY a JSON object:
+{{
+  "classifications": {{
+    "path/to/file.py": "ANNOTATE",
+    "path/to/config.json": "IGNORE",
+    "path/to/migration.py": "SKIP"
+  }}
+}}"""
+
+
+def annotation_prompt(
+    file_path: str,
+    file_content: str,
+    language: str,
+    comment_style: str,
+    level: str,
+    wire_connections: dict = None,
+    existing_doc: str = "",
+) -> str:
+    """Generate annotations (docstrings + comments) for a source file."""
+    wire_section = ""
+    if wire_connections:
+        called_by = wire_connections.get("called_by", [])
+        calls = wire_connections.get("calls", [])
+        reads = wire_connections.get("reads", [])
+        if called_by or calls or reads:
+            wire_section = "\n\nKnown wire connections (from CodiLay dependency analysis):"
+            if called_by:
+                wire_section += f"\n  Called by: {', '.join(called_by)}"
+            if calls:
+                wire_section += f"\n  Calls: {', '.join(calls)}"
+            if reads:
+                wire_section += f"\n  Reads/uses: {', '.join(reads)}"
+
+    doc_section = ""
+    if existing_doc:
+        doc_section = f"\n\nExisting documentation context:\n{existing_doc[:1500]}"
+
+    level_instruction = {
+        "docstrings": "Add docstrings/block comments ONLY to functions and classes. Do not add inline comments.",
+        "inline": "Add meaningful inline comments to non-obvious lines. Do not add or modify function/class docstrings.",
+        "full": "Add docstrings to functions/classes AND inline comments on non-obvious lines.",
+    }.get(level, "Add docstrings/block comments ONLY to functions and classes.")
+
+    return f"""You are annotating a {language} source file with documentation comments.
+
+File: {file_path}
+Language: {language}
+Comment style: {comment_style}
+Annotation level: {level}
+
+Instructions:
+- {level_instruction}
+- Use the correct comment style for {language}: {comment_style}
+- For each function/class docstring, include:
+  - A one-line summary of what it does
+  - Wire connections block (called by, calls, key dependencies) — use the wire data provided
+  - Key behavior, edge cases, or gotchas if non-obvious
+- NEVER modify existing comments or docstrings — only add NEW ones
+- NEVER modify the actual code logic — only add comments
+- Skip very short functions (under 5 lines) unless they have complex wires
+- Confidence: rate your confidence per annotation (0.0–1.0). Below 0.6 means you are guessing.{wire_section}{doc_section}
+
+Source file to annotate:
+```{language}
+{file_content}
+```
+
+Respond with ONLY a JSON object:
+{{
+  "annotations": [
+    {{
+      "type": "docstring",
+      "target": "function or class name",
+      "line": 42,
+      "comment": "the docstring or block comment text (without delimiters — you provide the text, the tool adds the syntax)",
+      "confidence": 0.9
+    }},
+    {{
+      "type": "inline",
+      "line": 55,
+      "comment": "inline comment text",
+      "confidence": 0.85
+    }}
+  ],
+  "skip_reason": null
+}}
+
+If this file should not be annotated (e.g. it already has complete documentation, or it is too simple), set annotations to [] and explain in skip_reason."""
