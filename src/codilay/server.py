@@ -179,19 +179,32 @@ def create_app(
     # ── Conversation management endpoints ──────────────────────────
 
     @app.get("/api/conversations")
-    async def list_conversations():
-        """List all conversations, most recent first."""
-        return {"conversations": chat_store.list_conversations()}
+    async def list_conversations(user: Optional[str] = None, include_team: bool = True):
+        """
+        List conversations, most recent first.
+
+        Privacy filtering:
+        - user=None        → all conversations
+        - user=alice       → alice's private convs + team convs (if include_team=true)
+        - include_team=false → only private convs for the given user
+        """
+        return {"conversations": chat_store.list_conversations(user=user, include_team=include_team)}
 
     @app.post("/api/conversations")
-    async def create_conversation(title: str = ""):
-        """Create a new conversation."""
-        conv = chat_store.create_conversation(title=title)
+    async def create_conversation(
+        title: str = "",
+        visibility: str = "private",
+        owner: Optional[str] = None,
+    ):
+        """Create a new conversation. visibility: 'private' | 'team'"""
+        if visibility not in ("private", "team"):
+            raise HTTPException(status_code=400, detail="visibility must be 'private' or 'team'")
+        conv = chat_store.create_conversation(title=title, visibility=visibility, owner=owner)
         return conv
 
     @app.get("/api/conversations/{conv_id}")
     async def get_conversation(conv_id: str):
-        """Get a full conversation with all messages."""
+        """Get a full conversation with all messages (active branch)."""
         conv = chat_store.get_conversation(conv_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -212,6 +225,49 @@ def create_app(
             raise HTTPException(status_code=404, detail="Conversation not found")
         return conv
 
+    @app.patch("/api/conversations/{conv_id}/visibility")
+    async def update_conv_visibility(conv_id: str, visibility: str, owner: Optional[str] = None):
+        """Change a conversation's visibility (private/team)."""
+        if visibility not in ("private", "team"):
+            raise HTTPException(status_code=400, detail="visibility must be 'private' or 'team'")
+        conv = chat_store.update_visibility(conv_id, visibility, owner)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return conv
+
+    # ── Branch endpoints ──────────────────────────────────────────
+
+    @app.get("/api/conversations/{conv_id}/branches")
+    async def list_branches(conv_id: str):
+        """List all branches for a conversation."""
+        branches = chat_store.list_branches(conv_id)
+        if branches is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"branches": branches}
+
+    @app.post("/api/conversations/{conv_id}/branches/switch/{branch_id}")
+    async def switch_branch(conv_id: str, branch_id: str):
+        """Switch the active branch of a conversation."""
+        conv = chat_store.switch_branch(conv_id, branch_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="Conversation or branch not found")
+        return conv
+
+    @app.patch("/api/conversations/{conv_id}/branches/{branch_id}/label")
+    async def rename_branch(conv_id: str, branch_id: str, label: str):
+        """Rename a branch."""
+        if not chat_store.rename_branch(conv_id, branch_id, label):
+            raise HTTPException(status_code=404, detail="Conversation or branch not found")
+        return {"renamed": True, "label": label}
+
+    @app.get("/api/conversations/{conv_id}/branches/{branch_id}/messages")
+    async def get_branch_messages(conv_id: str, branch_id: str):
+        """Get messages for a specific branch (not just the active one)."""
+        messages = chat_store.get_branch_messages(conv_id, branch_id)
+        if messages is None:
+            raise HTTPException(status_code=404, detail="Conversation or branch not found")
+        return {"messages": messages, "branch_id": branch_id}
+
     # ── Message control endpoints ─────────────────────────────────
 
     @app.post("/api/conversations/{conv_id}/messages/{msg_id}/pin")
@@ -223,7 +279,10 @@ def create_app(
 
     @app.post("/api/conversations/{conv_id}/messages/{msg_id}/edit")
     async def edit_message(conv_id: str, msg_id: str, content: str = ""):
-        """Edit a message and truncate everything after it."""
+        """
+        Edit a message. Creates a new branch from this point rather than truncating.
+        The original branch is preserved. Returns the conversation with the new branch active.
+        """
         if not content:
             raise HTTPException(status_code=400, detail="Content is required")
         conv = chat_store.edit_message(conv_id, msg_id, content)
@@ -232,16 +291,19 @@ def create_app(
         return conv
 
     @app.post("/api/conversations/{conv_id}/branch/{msg_id}")
-    async def branch_conversation(conv_id: str, msg_id: str):
-        """Create a new conversation branching from a specific message."""
-        branch = chat_store.branch_conversation(conv_id, msg_id)
-        if branch is None:
+    async def branch_at_message(conv_id: str, msg_id: str):
+        """
+        Create a new empty branch starting from msg_id (inclusive).
+        Switches to the new branch — caller can continue adding messages.
+        """
+        conv = chat_store.branch_conversation(conv_id, msg_id)
+        if conv is None:
             raise HTTPException(status_code=404, detail="Conversation or message not found")
-        return branch
+        return conv
 
     @app.get("/api/conversations/{conv_id}/export")
     async def export_conversation(conv_id: str):
-        """Export a conversation to markdown."""
+        """Export the active branch of a conversation to markdown."""
         md = chat_store.export_markdown(conv_id)
         if md is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
@@ -249,7 +311,7 @@ def create_app(
 
     @app.get("/api/conversations/{conv_id}/pinned")
     async def get_conv_pinned_messages(conv_id: str):
-        """Get pinned messages for a conversation."""
+        """Get pinned messages in the active branch of a conversation."""
         return {"pinned": chat_store.get_pinned_messages(conv_id)}
 
     @app.get("/api/pinned")

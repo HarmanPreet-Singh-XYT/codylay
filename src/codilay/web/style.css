@@ -2372,3 +2372,116 @@ body.light-mode .fix-box {
 [data-theme="light"] .expand-icon {
     color: #9ca3af !important;
 }
+
+/* ── Branch switcher panel ───────────────────────── */
+.chat-branch-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 280px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 0 0 8px 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 50;
+    box-shadow: var(--shadow-lg);
+    display: none;
+}
+
+.chat-branch-panel.open {
+    display: block;
+}
+
+.branch-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+}
+
+.branch-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.branch-item.active {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-left: 2px solid var(--accent);
+}
+
+.branch-item-label {
+    font-size: 13px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.branch-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+/* ── Edit button on user messages ────────────────── */
+.chat-msg.user:hover .msg-actions {
+    opacity: 1;
+}
+
+.chat-msg.user .msg-actions {
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+/* ── Conversation section labels ─────────────────── */
+.conv-section-label {
+    padding: 6px 14px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+}
+
+.conv-section-label:first-child {
+    border-top: none;
+    margin-top: 0;
+}
+
+.conv-user-row {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+}
+
+.conv-change-user-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0;
+    margin-left: auto;
+    text-decoration: underline;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.chat-branch-btn {
+    font-size: 11px;
+    gap: 4px;
+    white-space: nowrap;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}

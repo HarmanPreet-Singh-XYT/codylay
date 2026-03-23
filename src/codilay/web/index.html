@@ -96,6 +96,9 @@
           <span class="chat-conv-title" id="chat-conv-title">New conversation</span>
         </div>
         <div class="chat-toolbar-right">
+          <button class="chat-icon-btn chat-branch-btn" id="chat-branch-btn" onclick="chatToggleBranches()" title="Conversation branches" style="display:none;">
+            <i data-lucide="git-branch"></i> main
+          </button>
           <button class="chat-icon-btn" onclick="chatToggleHistory()" title="Conversation history"><i
               data-lucide="history"></i></button>
           <button class="chat-icon-btn" onclick="chatExport()" title="Export to markdown"><i
@@ -104,6 +107,8 @@
         </div>
         <!-- Conversation history dropdown -->
         <div class="chat-conv-dropdown" id="chat-conv-dropdown"></div>
+        <!-- Branch switcher panel -->
+        <div class="chat-branch-panel" id="chat-branch-panel"></div>
       </div>
 
       <!-- Memory bar -->

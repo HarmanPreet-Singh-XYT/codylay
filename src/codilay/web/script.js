@@ -2250,8 +2250,11 @@ document.addEventListener('keydown', e => {
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 let currentConvId = null;
+let currentActiveBranchId = 'main';
+let currentUser = localStorage.getItem('codilay-user') || null;
 let deepMode = false;
 let historyOpen = false;
+let branchesOpen = false;
 let chatWidth = parseInt(localStorage.getItem('chatWidth')) || 440;
 
 // Initialize chat width
@@ -2343,7 +2346,7 @@ async function sendChat() {
     const question = input.value.trim();
     if (!question) return;
 
-    // Add user message
+    // Add user message (msg ID not yet known; will be set when conversation is resumed)
     addChatMsg(question, 'user');
     input.value = '';
     input.style.height = 'auto';
@@ -2454,7 +2457,7 @@ function addBotMessage(data) {
 // ── Add simple message ───────────────────────────
 let msgCounter = 0;
 
-function addChatMsg(content, role, isHtml = false) {
+function addChatMsg(content, role, isHtml = false, msgId = null) {
     const id = `msg-${++msgCounter}`;
     const messages = document.getElementById('chat-messages');
     const welcome = messages.querySelector('.welcome-msg');
@@ -2463,9 +2466,16 @@ function addChatMsg(content, role, isHtml = false) {
     const div = document.createElement('div');
     div.className = `chat-msg ${role}`;
     div.id = id;
+    if (msgId) div.dataset.msgId = msgId;
 
     if (role === 'user') {
-        div.innerHTML = `<div class="msg-label"><i data-lucide="user"></i> You</div><div class="msg-bubble">${escHtml(content)}</div>`;
+        const editBtn = msgId && currentConvId
+            ? `<button class="msg-action-btn" onclick="chatStartEdit('${msgId}', this)" title="Edit — creates new branch"><i data-lucide="pencil" style="width:12px;height:12px;"></i> Edit</button>`
+            : '';
+        div.innerHTML = `
+            <div class="msg-label"><i data-lucide="user"></i> ${escHtml(currentUser || 'You')}</div>
+            <div class="msg-bubble">${escHtml(content)}</div>
+            ${editBtn ? `<div class="msg-actions">${editBtn}</div>` : ''}`;
     } else if (isHtml) {
         div.innerHTML = content;
     } else {
@@ -2476,6 +2486,122 @@ function addChatMsg(content, role, isHtml = false) {
     messages.scrollTop = messages.scrollHeight;
     updateIcons();
     return id;
+}
+
+// ── Edit message → branch ─────────────────────────
+function chatStartEdit(msgId, btn) {
+    const msgDiv = btn.closest('.chat-msg');
+    const bubble = msgDiv.querySelector('.msg-bubble');
+    const originalText = bubble.textContent.trim();
+
+    bubble.innerHTML = `
+        <textarea class="msg-edit-input" rows="3" style="width:100%;resize:vertical;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent);border-radius:6px;padding:8px;font-size:13px;">${escHtml(originalText)}</textarea>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+            <button class="tool-btn primary" style="font-size:12px;padding:4px 10px;" onclick="chatSubmitEdit('${msgId}', this)">Send (new branch)</button>
+            <button class="tool-btn" style="font-size:12px;padding:4px 10px;" onclick="chatCancelEdit(this, '${escAttr(originalText)}')">Cancel</button>
+        </div>`;
+    bubble.querySelector('textarea').focus();
+}
+
+function chatCancelEdit(btn, originalText) {
+    const bubble = btn.closest('.msg-bubble');
+    bubble.innerHTML = escHtml(originalText);
+}
+
+async function chatSubmitEdit(msgId, btn) {
+    const bubble = btn.closest('.msg-bubble');
+    const textarea = bubble.querySelector('textarea');
+    const newContent = textarea.value.trim();
+    if (!newContent || !currentConvId) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Creating branch…';
+
+    try {
+        const params = new URLSearchParams({ content: newContent });
+        const res = await fetch(`/api/conversations/${currentConvId}/messages/${msgId}/edit?${params}`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const conv = await res.json();
+
+        currentActiveBranchId = conv.active_branch_id || 'main';
+
+        // Re-render the conversation with the new active branch
+        await chatResumeConv(currentConvId);
+        updateBranchIndicator();
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = 'Send (new branch)';
+        alert(`Edit failed: ${e.message}`);
+    }
+}
+
+// ── Branch switcher ───────────────────────────────
+async function chatToggleBranches() {
+    if (!currentConvId) return;
+    branchesOpen = !branchesOpen;
+    const panel = document.getElementById('chat-branch-panel');
+    if (!panel) return;
+    panel.classList.toggle('open', branchesOpen);
+
+    if (branchesOpen) {
+        try {
+            const res = await fetch(`/api/conversations/${currentConvId}/branches`);
+            const data = await res.json();
+            const branches = data.branches || [];
+
+            if (branches.length <= 1) {
+                panel.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:12px;">Only one branch — edit a message to create more.</div>';
+            } else {
+                panel.innerHTML = branches.map(b => `
+                    <div class="branch-item ${b.is_active ? 'active' : ''}" onclick="chatSwitchBranch('${b.id}')">
+                        <div class="branch-item-label">
+                            <i data-lucide="${b.is_active ? 'git-branch' : 'git-branch'}" style="width:12px;height:12px;${b.is_active ? 'color:var(--accent);' : ''}"></i>
+                            ${b.is_active ? '<strong>' : ''}${escHtml(b.label)}${b.is_active ? '</strong>' : ''}
+                            ${b.is_active ? '<span style="font-size:10px;color:var(--accent);margin-left:4px;">● active</span>' : ''}
+                        </div>
+                        <div class="branch-item-meta">${b.message_count} msgs · forked after msg ${b.fork_msg_id ? b.fork_msg_id.slice(0, 6) : 'root'}</div>
+                    </div>`).join('');
+            }
+            updateIcons();
+        } catch (e) {
+            panel.innerHTML = '<div style="padding:12px;color:var(--red);font-size:12px;">Failed to load branches</div>';
+        }
+    }
+}
+
+async function chatSwitchBranch(branchId) {
+    if (!currentConvId) return;
+    try {
+        const res = await fetch(`/api/conversations/${currentConvId}/branches/switch/${branchId}`, { method: 'POST' });
+        if (!res.ok) throw new Error(await res.text());
+        const conv = await res.json();
+        currentActiveBranchId = conv.active_branch_id || branchId;
+        branchesOpen = false;
+        document.getElementById('chat-branch-panel').classList.remove('open');
+        await chatResumeConv(currentConvId);
+        updateBranchIndicator();
+    } catch (e) {
+        console.error('Switch branch failed:', e);
+    }
+}
+
+async function updateBranchIndicator() {
+    if (!currentConvId) return;
+    try {
+        const res = await fetch(`/api/conversations/${currentConvId}/branches`);
+        const data = await res.json();
+        const branches = data.branches || [];
+        const btn = document.getElementById('chat-branch-btn');
+        if (btn) {
+            const active = branches.find(b => b.is_active);
+            const label = active ? active.label : 'main';
+            btn.innerHTML = `<i data-lucide="git-branch"></i> ${escHtml(label)}${branches.length > 1 ? ` <span style="background:var(--accent);color:#fff;border-radius:8px;padding:1px 5px;font-size:10px;">${branches.length}</span>` : ''}`;
+            btn.style.display = branches.length > 0 ? '' : 'none';
+            updateIcons();
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function removeChatMsg(id) {
@@ -2583,38 +2709,97 @@ async function chatToggleHistory() {
 
     if (historyOpen) {
         try {
-            const res = await fetch('/api/conversations');
+            // Build user-aware URL for privacy filtering
+            const params = new URLSearchParams();
+            if (currentUser) params.set('user', currentUser);
+            const res = await fetch('/api/conversations?' + params);
             const data = await res.json();
             const convs = data.conversations || [];
 
+            const userLabel = currentUser
+                ? `<div class="conv-user-row"><i data-lucide="user" style="width:12px;height:12px;"></i> <span>${escHtml(currentUser)}</span> <button class="conv-change-user-btn" onclick="chatSetUser()" title="Change user">change</button></div>`
+                : `<div class="conv-user-row"><button class="conv-change-user-btn" onclick="chatSetUser()"><i data-lucide="user" style="width:12px;height:12px;"></i> Set username</button></div>`;
+
             if (convs.length === 0) {
-                dropdown.innerHTML = '<div style="padding:16px;color:var(--text-muted);font-size:12px;text-align:center;">No past conversations</div>';
+                dropdown.innerHTML = userLabel + '<div style="padding:12px 16px;color:var(--text-muted);font-size:12px;text-align:center;">No past conversations</div>';
             } else {
-                dropdown.innerHTML = convs.map(c => `
-            <div class="chat-conv-item" onclick="chatResumeConv('${c.id}')">
-            <div class="chat-conv-item-title">${escHtml(c.title || 'Untitled')}</div>
-            <div class="chat-conv-item-meta">
-                <span>${c.message_count || 0} msgs</span>
-                <span>&bull;</span>
-                <span>${(c.updated_at || '').slice(0, 16)}</span>
-            </div>
-            </div>
-        `).join('');
+                const privateConvs = convs.filter(c => c.visibility === 'private');
+                const teamConvs = convs.filter(c => c.visibility === 'team');
+
+                const convItem = c => `
+                    <div class="chat-conv-item" onclick="chatResumeConv('${c.id}')">
+                    <div class="chat-conv-item-title">${escHtml(c.title || 'Untitled')}</div>
+                    <div class="chat-conv-item-meta">
+                        <span>${c.message_count || 0} msgs</span>
+                        ${c.branch_count > 1 ? `<span>&bull;</span><span><i data-lucide="git-branch" style="width:10px;height:10px;"></i> ${c.branch_count} branches</span>` : ''}
+                        <span>&bull;</span>
+                        <span>${(c.updated_at || '').slice(0, 16)}</span>
+                    </div>
+                    </div>`;
+
+                let html = userLabel;
+                if (privateConvs.length > 0) {
+                    html += `<div class="conv-section-label"><i data-lucide="lock" style="width:11px;height:11px;"></i> Private</div>`;
+                    html += privateConvs.map(convItem).join('');
+                }
+                if (teamConvs.length > 0) {
+                    html += `<div class="conv-section-label"><i data-lucide="users" style="width:11px;height:11px;"></i> Team</div>`;
+                    html += teamConvs.map(convItem).join('');
+                }
+                dropdown.innerHTML = html;
             }
+            updateIcons();
         } catch (e) {
             dropdown.innerHTML = '<div style="padding:16px;color:var(--red);font-size:12px;">Failed to load history</div>';
         }
     }
 }
 
+function chatSetUser() {
+    const name = prompt('Enter your username (leave blank to clear):', currentUser || '');
+    if (name === null) return; // cancelled
+    currentUser = name.trim() || null;
+    if (currentUser) {
+        localStorage.setItem('codilay-user', currentUser);
+    } else {
+        localStorage.removeItem('codilay-user');
+    }
+    // Refresh the dropdown if open
+    if (historyOpen) chatToggleHistory();
+}
+
+async function chatNewConversationWithVisibility() {
+    const vis = prompt('Visibility for new conversation:\n  private — only visible to you\n  team    — shared with team\n\nEnter "private" or "team":', 'private');
+    if (!vis) return;
+    const visibility = vis.trim().toLowerCase() === 'team' ? 'team' : 'private';
+    const params = new URLSearchParams({ visibility });
+    if (currentUser) params.set('owner', currentUser);
+    try {
+        const res = await fetch('/api/conversations?' + params, { method: 'POST' });
+        const conv = await res.json();
+        currentConvId = conv.id;
+        currentActiveBranchId = conv.active_branch_id || 'main';
+        document.getElementById('chat-conv-title').textContent = 'New conversation';
+        document.getElementById('chat-messages').innerHTML = '';
+        chatNewConversation();
+    } catch (e) {
+        console.error('Failed to create conversation:', e);
+        chatNewConversation(); // fallback
+    }
+}
+
 async function chatResumeConv(convId) {
     historyOpen = false;
+    branchesOpen = false;
     document.getElementById('chat-conv-dropdown').classList.remove('open');
+    const branchPanel = document.getElementById('chat-branch-panel');
+    if (branchPanel) branchPanel.classList.remove('open');
 
     try {
         const res = await fetch(`/api/conversations/${convId}`);
         const conv = await res.json();
         currentConvId = conv.id;
+        currentActiveBranchId = conv.active_branch_id || 'main';
         document.getElementById('chat-conv-title').textContent = conv.title || 'Untitled';
 
         // Render existing messages
@@ -2623,7 +2808,7 @@ async function chatResumeConv(convId) {
 
         (conv.messages || []).forEach(m => {
             if (m.role === 'user') {
-                addChatMsg(m.content, 'user');
+                addChatMsg(m.content, 'user', false, m.id);  // pass msg.id for edit support
             } else if (m.role === 'assistant') {
                 addBotMessage({
                     answer: m.content,
@@ -2636,6 +2821,7 @@ async function chatResumeConv(convId) {
         });
 
         messages.scrollTop = messages.scrollHeight;
+        updateBranchIndicator();
     } catch (e) {
         console.error('Resume failed:', e);
     }

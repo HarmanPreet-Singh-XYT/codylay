@@ -1875,6 +1875,13 @@ def interactive(ctx):
             dry_run=result.get("dry_run", True),
         )
 
+    elif result and result.get("action") == "shell":
+        import subprocess
+
+        command = result.get("command", "")
+        if command:
+            subprocess.run(command, shell=True)
+
 
 # ─── Setup wizard ─────────────────────────────────────────────────────────────
 

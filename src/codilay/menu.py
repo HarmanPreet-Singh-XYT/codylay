@@ -1483,6 +1483,8 @@ def _menu_tools(settings: Settings) -> Optional[dict]:
         menu.add_row("[9]", "📊  Triage feedback — improve triage accuracy")
         menu.add_row("[10]", "🛡️   Audit system — security, performance, architecture")
         menu.add_row("[11]", "✍️   Annotate — add AI-generated docstrings & comments")
+        menu.add_row("[12]", "📝  Commit documentation — document what changed in commits")
+        menu.add_row("[13]", "🪝  Git hooks — install/remove auto-run hooks")
         menu.add_row("[0]", "← Back to main menu")
 
         console.print(menu)
@@ -1490,7 +1492,7 @@ def _menu_tools(settings: Settings) -> Optional[dict]:
 
         choice = Prompt.ask(
             "[bold cyan]Select a tool[/bold cyan]",
-            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+            choices=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"],
             default="0",
         )
 
@@ -1549,6 +1551,16 @@ def _menu_tools(settings: Settings) -> Optional[dict]:
 
         elif choice == "11":
             result = _menu_tool_annotate(settings)
+            if result:
+                return result
+
+        elif choice == "12":
+            result = _menu_tool_commit_doc(settings)
+            if result:
+                return result
+
+        elif choice == "13":
+            result = _menu_tool_hooks(settings)
             if result:
                 return result
 
@@ -1976,3 +1988,151 @@ def _menu_help():
         )
     )
     _pause()
+
+
+# ── T12. Commit Documentation ────────────────────────────────────────────────
+
+
+def _menu_tool_commit_doc(settings: Settings) -> Optional[dict]:
+    """Generate plain-language docs for git commits."""
+    _clear()
+    _header("Commit Documentation")
+    _back_hint()
+
+    target = _prompt_target_path()
+    if not target:
+        return None
+
+    while True:
+        _clear()
+        _header("Commit Documentation · Options")
+        console.print("[dim]Generate plain-language docs explaining what changed in commits.[/dim]\n")
+
+        opts = Table(show_header=False, box=None, padding=(0, 2))
+        opts.add_column("key", style="bold cyan", width=6, justify="right")
+        opts.add_column("action")
+
+        opts.add_row("[1]", "📝  Document latest commit")
+        opts.add_row("[2]", "🔢  Document a specific commit hash")
+        opts.add_row("[3]", "📚  Document last N commits")
+        opts.add_row("[4]", "🌿  Document a commit range (e.g. main..HEAD)")
+        opts.add_row("[5]", "📖  Backfill entire repo history")
+        opts.add_row("[0]", "← Back")
+
+        console.print(opts)
+        console.print()
+
+        choice = Prompt.ask(
+            "[bold cyan]Select[/bold cyan]",
+            choices=["0", "1", "2", "3", "4", "5"],
+            default="1",
+        )
+
+        if choice == "0":
+            return None
+
+        metrics = Confirm.ask("Include quality metrics analysis?", default=False)
+        metrics_flag = " --metrics" if metrics else ""
+
+        if choice == "1":
+            return {"action": "shell", "command": f"codilay commit-doc --target {target}{metrics_flag}"}
+
+        elif choice == "2":
+            commit_hash = Prompt.ask("Enter commit hash (or leave blank for last)")
+            if _is_back(commit_hash):
+                continue
+            if commit_hash.strip():
+                return {
+                    "action": "shell",
+                    "command": f"codilay commit-doc {commit_hash.strip()} --target {target}{metrics_flag}",
+                }
+            return {"action": "shell", "command": f"codilay commit-doc --target {target}{metrics_flag}"}
+
+        elif choice == "3":
+            n = Prompt.ask("How many recent commits?", default="10")
+            if _is_back(n):
+                continue
+            try:
+                int(n)
+            except ValueError:
+                console.print("[red]Please enter a valid number.[/red]")
+                _pause()
+                continue
+            return {"action": "shell", "command": f"codilay commit-doc --last {n} --target {target}{metrics_flag}"}
+
+        elif choice == "4":
+            commit_range = Prompt.ask("Enter range (e.g. main..HEAD)", default="main..HEAD")
+            if _is_back(commit_range):
+                continue
+            return {
+                "action": "shell",
+                "command": f"codilay commit-doc --range {commit_range} --target {target}{metrics_flag}",
+            }
+
+        elif choice == "5":
+            force = Confirm.ask("Re-process already-documented commits?", default=False)
+            force_flag = " --force" if force else ""
+            yes = Confirm.ask("Skip confirmation prompt?", default=False)
+            yes_flag = " --yes" if yes else ""
+            return {
+                "action": "shell",
+                "command": f"codilay commit-doc --all --target {target}{metrics_flag}{force_flag}{yes_flag}",
+            }
+
+
+# ── T13. Git Hooks ───────────────────────────────────────────────────────────
+
+
+def _menu_tool_hooks(settings: Settings) -> Optional[dict]:
+    """Install or remove CodiLay git hooks."""
+    _clear()
+    _header("Git Hooks")
+    _back_hint()
+
+    target = _prompt_target_path()
+    if not target:
+        return None
+
+    while True:
+        _clear()
+        _header("Git Hooks · Manage Auto-Run Hooks")
+        console.print(
+            "[dim]Hooks run automatically after git operations. The post-commit hook\n"
+            "generates commit docs in the background after every [bold]git commit[/bold].[/dim]\n"
+        )
+
+        opts = Table(show_header=False, box=None, padding=(0, 2))
+        opts.add_column("key", style="bold cyan", width=6, justify="right")
+        opts.add_column("action")
+
+        opts.add_row("[1]", "🪝   Install post-commit hook  [dim](auto commit-doc)[/dim]")
+        opts.add_row("[2]", "🗑️   Uninstall post-commit hook")
+        opts.add_row("[0]", "← Back")
+
+        console.print(opts)
+        console.print()
+
+        choice = Prompt.ask(
+            "[bold cyan]Select[/bold cyan]",
+            choices=["0", "1", "2"],
+            default="0",
+        )
+
+        if choice == "0":
+            return None
+
+        elif choice == "1":
+            console.print(
+                "\n[bold yellow]This will install a post-commit hook that auto-generates\n"
+                "commit documentation after every [bold]git commit[/bold] in this repo.[/bold yellow]\n"
+            )
+            confirmed = Confirm.ask("Install the hook?", default=True)
+            if not confirmed:
+                continue
+            return {"action": "shell", "command": f"codilay hooks install {target} --commit-doc"}
+
+        elif choice == "2":
+            confirmed = Confirm.ask("Remove the post-commit hook?", default=False)
+            if not confirmed:
+                continue
+            return {"action": "shell", "command": f"codilay hooks uninstall {target} --commit-doc"}
