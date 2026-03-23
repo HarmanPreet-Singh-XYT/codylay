@@ -73,6 +73,10 @@ Why use flags when you can have a full-blown dashboard in your terminal?
 - **History Browser**: View past conversations and export logs.
 - **Smart Resume Detection**: When choosing "Document a codebase", CodiLay peeks at the existing state file and shows an incomplete-run banner with file counts before you confirm — so you know you're resuming, not starting fresh.
 
+The **Tools & Automation** submenu (press `9`) now includes:
+- **[12] Commit documentation** — interactive prompts to document the latest commit, a specific hash, the last N commits, a range, or the full repo history (with optional metrics).
+- **[13] Git hooks** — install or remove the post-commit hook that auto-generates commit docs in the background after every `git commit`.
+
 ### 🧠 The Wire Model
 CodiLay treats every import, function call, and variable reference as a **Wire**. 
 - **Open Wires**: Unresolved references that the agent is "hunting" for.
@@ -92,20 +96,54 @@ CodiLay is repo-aware. If you've only changed 2 files in a 500-file project, `co
 4. Re-calculate the local impact to keep your `CODEBASE.md` current.
 
 ### 💬 Interactive Chat & Memory
-Ask questions about your codebase using `codilay chat .`. 
+Ask questions about your codebase using `codilay chat .`.
 - **RAG + Deep Search**: It uses your documentation for fast answers but can "escalate" to reading source code for implementation details.
 - **Memory**: The agent remembers your preferences and facts about the codebase across sessions.
 - **Promote to Doc**: Found a great explanation in chat? Use `/promote` to turn the AI's answer into a permanent section of your documentation.
+
+#### 🌿 Conversation Tree — Branching on Edit
+Conversations are a **tree**, not a list. Every message is a node; editing a past message creates a new branch from that point while fully preserving the original thread. You can navigate, compare, and continue any branch independently.
+
+```
+msg_001  "How does the payment service work?"
+msg_002  "The payment service handles..."
+msg_003  "What about retries?"
+    │
+    ├── main branch (original)
+    │   msg_004  "Retries use exponential backoff..."
+    │   msg_005  "How long are the delays?"
+    │
+    └── webhooks branch (created by editing msg_003)
+        msg_006  "Retries are separate from webhooks..."
+        msg_007  "Where are webhooks handled?"
+```
+
+The LLM context for each branch only includes its own ancestry — edits on a sibling branch are invisible. Old conversations are migrated automatically on first read.
+
+#### 🔒 Private & Team Workspaces
+Every conversation has a **visibility** setting:
+
+| Visibility | Who sees it |
+|:---|:---|
+| `private` | Only the conversation owner |
+| `team` | All team members |
+
+The Web UI history sidebar splits conversations into **Private** and **Team** sections. Set your username once (stored in the browser) and the filter applies automatically. A conversation can start private and be promoted to team-visible at any time.
 
 ```bash
 codilay serve .
 ```
 
 - **Layer 1: The Reader**: High-fidelity rendering of your sections and graph.
-- **Layer 2: The Chatbot**: Quick Q&A from documented context.
+- **Layer 2: The Chatbot**: Quick Q&A from documented context — with branch-aware history (only the active branch's messages are sent to the LLM).
 - **Layer 3: The Deep Agent**: Reaches into source code to verify facts.
 - **Layer 4: Audit Lab**: Browse past audit reports and run new ones directly from the web interface.
 - **Commits tab**: Browse all commit docs, generate new ones (with optional context and metrics), and read full docs with visual quality score bars.
+
+**Branch navigation in the Web UI:**
+- An **Edit** button appears on hover over any past user message — clicking it opens an inline textarea; submitting creates a new branch.
+- A **branch indicator button** in the chat toolbar shows the active branch name and total count; clicking it opens a switcher to jump between branches.
+- The **history dropdown** groups conversations by Private and Team, shows branch count per conversation, and lets you set/change your username.
 
 ### 👁 Watch Mode & Real-time Progress
 Run CodiLay in the background and automatically update documentation when files change. 
@@ -585,6 +623,20 @@ Audits can be managed and viewed from the **CLI**, the **Interactive Menu**, or 
 | `codilay commit-doc --all --yes` | Skip cost preview and run immediately |
 | `codilay hooks install . --commit-doc` | Auto-generate commit docs via post-commit hook |
 | `codilay hooks uninstall . --commit-doc` | Remove the post-commit hook |
+
+**Web UI conversation API** (used by the frontend and available for scripting):
+
+| Endpoint | Description |
+|:---|:---|
+| `GET /api/conversations?user=alice` | Conversations visible to alice (private + team) |
+| `GET /api/conversations?user=alice&include_team=false` | Private conversations only |
+| `POST /api/conversations?visibility=team&owner=alice` | Create a team-visible conversation |
+| `PATCH /api/conversations/{id}/visibility?visibility=team` | Change visibility |
+| `GET /api/conversations/{id}/branches` | List all branches with message counts |
+| `POST /api/conversations/{id}/branches/switch/{branch_id}` | Switch active branch |
+| `PATCH /api/conversations/{id}/branches/{branch_id}/label?label=name` | Rename a branch |
+| `GET /api/conversations/{id}/branches/{branch_id}/messages` | Messages for any branch |
+| `POST /api/conversations/{id}/messages/{msg_id}/edit?content=...` | Edit → creates new branch |
 
 ---
 

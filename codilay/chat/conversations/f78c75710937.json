@@ -3,8 +3,11 @@
   "title": "hey",
   "created_at": "2026-03-18T05:17:34.107637+00:00",
   "updated_at": "2026-03-18T05:17:34.129658+00:00",
-  "messages": [
-    {
+  "format": "tree",
+  "visibility": "private",
+  "owner": null,
+  "nodes": {
+    "38d2ab84be2a": {
       "id": "38d2ab84be2a",
       "role": "user",
       "content": "hey",
@@ -13,9 +16,12 @@
       "escalated": false,
       "pinned": false,
       "parent_id": null,
-      "created_at": "2026-03-18T05:17:34.108779+00:00"
+      "created_at": "2026-03-18T05:17:34.108779+00:00",
+      "children": [
+        "e8674895e4c0"
+      ]
     },
-    {
+    "e8674895e4c0": {
       "id": "e8674895e4c0",
       "role": "assistant",
       "content": "I couldn't find relevant source files to answer this question. Try rephrasing with specific file names or module names.",
@@ -24,9 +30,23 @@
       "escalated": true,
       "pinned": false,
       "parent_id": null,
-      "created_at": "2026-03-18T05:17:34.129476+00:00"
+      "created_at": "2026-03-18T05:17:34.129476+00:00",
+      "children": []
     }
-  ],
+  },
+  "branches": {
+    "main": {
+      "id": "main",
+      "label": "main",
+      "created_at": "2026-03-23T22:59:45.774892+00:00",
+      "fork_msg_id": null,
+      "path": [
+        "38d2ab84be2a",
+        "e8674895e4c0"
+      ]
+    }
+  },
+  "active_branch_id": "main",
   "parent_conv_id": null,
   "branch_point_msg_id": null
 }
