@@ -4082,3 +4082,283 @@ def annotate(ctx, target, scope, exclude, level, dry_run, rollback_id, no_git_ch
         wire_data=closed_wires,
         section_contents=section_contents,
     )
+
+
+# ─── Commit-doc command ────────────────────────────────────────────────────────
+
+
+@cli.command("commit-doc")
+@click.argument("commit_hash", default=None, required=False)
+@click.option("--target", "-t", default=".", type=click.Path(exists=True), help="Git repository root (default: .)")
+@click.option("--range", "commit_range", default=None, help="Commit range, e.g. main..HEAD")
+@click.option("--context", "use_context", is_flag=True, default=False, help="Include CODEBASE.md context if available")
+@click.option(
+    "--metrics",
+    "include_metrics",
+    is_flag=True,
+    default=False,
+    help="Append quality metrics analysis (code quality, security, complexity, etc.)",
+)
+@click.option("--silent", is_flag=True, default=False, help="Suppress terminal output (useful for git hooks)")
+# ── Backfill options ──────────────────────────────────────────────────────────
+@click.option("--all", "backfill_all", is_flag=True, default=False, help="Document entire repo history")
+@click.option("--from", "from_ref", default=None, help="Start from this commit hash, tag, or date (YYYY-MM-DD)")
+@click.option("--to", "to_ref", default="HEAD", help="End at this commit (default: HEAD)")
+@click.option("--last", "last_n", default=None, type=int, help="Document the last N commits")
+@click.option("--author", default=None, help="Filter by author email or name")
+@click.option("--path", "path_filter", default=None, help="Only commits touching this path or glob")
+@click.option("--include-merges", is_flag=True, default=False, help="Include merge commits (excluded by default)")
+@click.option("--force", is_flag=True, default=False, help="Re-process commits that already have docs")
+@click.option("--force-metrics", is_flag=True, default=False, help="Re-run metrics pass only on docs that lack metrics")
+@click.option("--workers", default=4, type=int, show_default=True, help="Parallel workers for backfill")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt for backfill")
+@click.pass_context
+def commit_doc_command(
+    ctx,
+    commit_hash,
+    target,
+    commit_range,
+    use_context,
+    include_metrics,
+    silent,
+    backfill_all,
+    from_ref,
+    to_ref,
+    last_n,
+    author,
+    path_filter,
+    include_merges,
+    force,
+    force_metrics,
+    workers,
+    yes,
+):
+    """Generate plain-language documentation for commits.
+
+    \b
+    Single commit:
+        codilay commit-doc                       Last commit
+        codilay commit-doc abc123f               Specific commit
+        codilay commit-doc --range main..HEAD    All commits in range
+        codilay commit-doc --context             Include CODEBASE.md sections
+        codilay commit-doc --metrics             Append quality metrics
+
+    \b
+    Backfill history:
+        codilay commit-doc --all                 Entire repo history
+        codilay commit-doc --from abc123f        From commit forward to HEAD
+        codilay commit-doc --from 2024-01-01     From date forward
+        codilay commit-doc --from A --to B       Specific range
+        codilay commit-doc --last 50             Last 50 commits
+        codilay commit-doc --all --author me@co  Filter by author
+        codilay commit-doc --all --force         Re-process already-documented
+        codilay commit-doc --all --force-metrics Add metrics to docs that lack them
+    """
+    from codilay.commit_doc import CommitDocGenerator
+    from codilay.ui import UI
+
+    target = os.path.abspath(target)
+    output_dir = ctx.obj.get("output") or os.path.join(target, "codilay")
+    config_path = ctx.obj.get("config_path")
+    cfg = CodiLayConfig.load(target, config_path)
+
+    ui = UI(console, False)
+    llm = LLMClient(cfg)
+    generator = CommitDocGenerator(llm_client=llm, output_dir=output_dir)
+
+    codebase_md_path = None
+    if use_context:
+        candidate = os.path.join(output_dir, "CODEBASE.md")
+        if os.path.exists(candidate):
+            codebase_md_path = candidate
+        elif not silent:
+            ui.warn("No CODEBASE.md found — run 'codilay .' first for richer output. Falling back to diff-only.")
+
+    is_backfill = backfill_all or from_ref is not None or last_n is not None
+
+    try:
+        # ── Backfill mode ───────────────────────────────────────────────────
+        if is_backfill:
+            estimate = generator.estimate_backfill(
+                repo_path=target,
+                from_ref=from_ref if not backfill_all else None,
+                to_ref=to_ref,
+                author=author,
+                path_filter=path_filter,
+                include_merges=include_merges,
+                last_n=last_n,
+                include_metrics=include_metrics,
+                force=force,
+            )
+
+            if not silent:
+                console.print(f"\n[bold]Found {estimate['total']} commits.[/bold]")
+                if estimate["already_documented"]:
+                    console.print(f"  {estimate['already_documented']} already documented — skipping")
+                if estimate["incomplete"]:
+                    console.print(f"  {estimate['incomplete']} incomplete — re-processing")
+                console.print(f"  {estimate['to_process']} need documentation")
+                console.print(
+                    f"\n[yellow]Estimated cost:[/yellow] ~${estimate['estimated_cost']:.2f} ({estimate['will_process']} commits × ~${generator.COST_PER_COMMIT:.2f} avg)"
+                )
+                if include_metrics:
+                    console.print("  (metrics doubles the estimate — two LLM calls per commit)")
+                console.print()
+
+                if estimate["will_process"] == 0:
+                    ui.info("Nothing to process.")
+                    return
+
+                if not yes:
+                    choices = ["c", "f", "q"]
+                    console.print("  [c] Continue    [f] Force re-process all    [q] Quit")
+                    choice = click.prompt("  Choice", default="c").strip().lower()
+                    if choice == "q":
+                        return
+                    if choice == "f":
+                        force = True
+                    console.print()
+
+            def _progress(done, total, short_hash, status):
+                icons = {"processed": "✓", "metrics_only": "~", "error": "✗"}
+                icon = icons.get(status, "•")
+                console.print(f"  [{done}/{total}] {icon} {short_hash}", end="\r")
+
+            ui.phase("Backfilling commit docs…")
+            summary = generator.backfill(
+                repo_path=target,
+                from_ref=from_ref if not backfill_all else None,
+                to_ref=to_ref,
+                author=author,
+                path_filter=path_filter,
+                include_merges=include_merges,
+                last_n=last_n,
+                use_context=use_context,
+                codebase_md_path=codebase_md_path,
+                include_metrics=include_metrics,
+                force=force,
+                force_metrics=force_metrics,
+                workers=workers,
+                progress_callback=_progress if not silent else None,
+            )
+
+            if not silent:
+                console.print()  # newline after \r progress
+                ui.success(
+                    f"Done — {len(summary['processed'])} processed, "
+                    f"{len(summary.get('metrics_only', []))} metrics-only, "
+                    f"{summary['skipped']} skipped, "
+                    f"{len(summary['errors'])} errors"
+                )
+                if summary.get("index_path"):
+                    ui.info(f"Index → {summary['index_path']}")
+                for err in summary["errors"]:
+                    ui.warn(f"  [{err['hash']}] {err['error']}")
+
+        # ── Range mode ──────────────────────────────────────────────────────
+        elif commit_range:
+            if not silent:
+                ui.phase(f"Generating commit docs for range: {commit_range}")
+            results = generator.generate_range(
+                commit_range=commit_range,
+                repo_path=target,
+                use_context=use_context,
+                codebase_md_path=codebase_md_path,
+                include_metrics=include_metrics,
+            )
+            if not silent:
+                for r in results:
+                    ui.success(f"[{r['hash']}] → {r['path']}")
+                ui.success(f"Generated {len(results)} commit doc(s) in {generator.docs_dir}")
+
+        # ── Single commit mode ──────────────────────────────────────────────
+        else:
+            if commit_hash is None:
+                commit_hash = generator.get_last_commit(target)
+            if not silent:
+                ui.phase(f"Generating commit doc for {commit_hash[:7]}")
+            result = generator.generate(
+                commit_hash=commit_hash,
+                repo_path=target,
+                use_context=use_context,
+                codebase_md_path=codebase_md_path,
+                include_metrics=include_metrics,
+            )
+            if not silent:
+                ui.success(f"Commit doc saved → {result['path']}")
+
+    except RuntimeError as e:
+        if not silent:
+            ui.error(str(e))
+
+
+# ─── Hooks group ──────────────────────────────────────────────────────────────
+
+
+@cli.group("hooks")
+def hooks_group():
+    """Manage CodiLay git hooks."""
+
+
+@hooks_group.command("install")
+@click.argument("target", default=".", type=click.Path(exists=True))
+@click.option("--commit-doc", "commit_doc", is_flag=True, default=False, help="Install post-commit hook for commit-doc")
+@click.pass_context
+def hooks_install(ctx, target, commit_doc):
+    """Install CodiLay git hooks into a repository.
+
+    \b
+    Examples:
+        codilay hooks install .                  Show available hooks
+        codilay hooks install . --commit-doc     Auto-generate commit docs on every commit
+    """
+    from codilay.commit_doc import CommitDocGenerator
+    from codilay.ui import UI
+
+    target = os.path.abspath(target)
+    output_dir = ctx.obj.get("output") or os.path.join(target, "codilay")
+    config_path = ctx.obj.get("config_path")
+    cfg = CodiLayConfig.load(target, config_path)
+    ui = UI(console, False)
+
+    if not commit_doc:
+        ui.info("No hook selected. Available options:")
+        console.print("  --commit-doc   Install post-commit hook to auto-generate commit docs")
+        return
+
+    if commit_doc:
+        llm = LLMClient(cfg)
+        generator = CommitDocGenerator(llm_client=llm, output_dir=output_dir)
+        try:
+            hook_path = generator.install_post_commit_hook(target)
+            ui.success(f"post-commit hook installed → {hook_path}")
+            ui.info("Commit docs will be generated silently after each commit.")
+        except RuntimeError as e:
+            ui.error(str(e))
+
+
+@hooks_group.command("uninstall")
+@click.argument("target", default=".", type=click.Path(exists=True))
+@click.option(
+    "--commit-doc", "commit_doc", is_flag=True, default=False, help="Remove the post-commit hook for commit-doc"
+)
+@click.pass_context
+def hooks_uninstall(ctx, target, commit_doc):
+    """Remove CodiLay git hooks from a repository."""
+    from codilay.commit_doc import CommitDocGenerator
+    from codilay.ui import UI
+
+    target = os.path.abspath(target)
+    output_dir = ctx.obj.get("output") or os.path.join(target, "codilay")
+    config_path = ctx.obj.get("config_path")
+    cfg = CodiLayConfig.load(target, config_path)
+    ui = UI(console, False)
+
+    if commit_doc:
+        llm = LLMClient(cfg)
+        generator = CommitDocGenerator(llm_client=llm, output_dir=output_dir)
+        removed = generator.uninstall_post_commit_hook(target)
+        if removed:
+            ui.success("post-commit hook removed.")
+        else:
+            ui.info("No CodiLay post-commit hook found.")

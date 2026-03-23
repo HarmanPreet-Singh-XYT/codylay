@@ -105,6 +105,7 @@ codilay serve .
 - **Layer 2: The Chatbot**: Quick Q&A from documented context.
 - **Layer 3: The Deep Agent**: Reaches into source code to verify facts.
 - **Layer 4: Audit Lab**: Browse past audit reports and run new ones directly from the web interface.
+- **Commits tab**: Browse all commit docs, generate new ones (with optional context and metrics), and read full docs with visual quality score bars.
 
 ### 👁 Watch Mode & Real-time Progress
 Run CodiLay in the background and automatically update documentation when files change. 
@@ -432,6 +433,97 @@ CodiLay is designed to survive interruptions without losing money or progress.
 └────────────────────────────────────────────────────────────┘
 ```
 
+### 📋 Commit Documentation
+
+Every commit tells a story — but commit messages are usually too terse to explain *why* a file was touched, what downstream effects a change has, or what a reviewer should pay close attention to. Commit docs fix that.
+
+CodiLay reads the git diff for any commit and writes a plain-language document explaining what changed in each file and why it matters. Optionally, it runs a second pass to score the diff across five quality dimensions.
+
+```bash
+# Document the last commit
+codilay commit-doc
+
+# Document a specific commit
+codilay commit-doc abc123f
+
+# Document all commits on a branch
+codilay commit-doc --range main..HEAD
+
+# Include relevant CODEBASE.md sections for downstream context
+codilay commit-doc --context
+
+# Append quality metrics analysis
+codilay commit-doc --metrics
+
+# Everything together
+codilay commit-doc abc123f --context --metrics
+```
+
+**What each doc contains:**
+- Plain-language summary of what changed overall
+- Per-file explanation of what that file's change actually does (not a diff restatement)
+
+**With `--metrics`**, a second LLM pass scores the diff across five dimensions:
+
+| Metric | What it measures |
+|:---|:---|
+| Code Quality | Readability, naming, visible code smells in changed lines |
+| Test Coverage | Ratio of test additions to logic additions (-1 = N/A for non-testable files) |
+| Security | Red flags in the diff — hardcoded secrets, injection risks, unsafe ops |
+| Complexity | Delta only — did the change make code more or less complex? |
+| Documentation | Were comments/docstrings added for the new logic? |
+
+Each metric is scored 0–10 with a one-line note and optional reviewer warnings for things worth a closer look.
+
+Docs are saved to `codilay/commit-docs/<hash>.md` — gitignored by default, easy to commit if the team wants them.
+
+**Backfill historical commits** — document your entire git history (or a slice of it) in one shot:
+
+```bash
+# Document every commit in the repo
+codilay commit-doc --all
+
+# Document the last 20 commits
+codilay commit-doc --last 20
+
+# Document a specific range (inclusive of both ends)
+codilay commit-doc --from abc123f --to def456a
+
+# Filter by author or path
+codilay commit-doc --all --author "alice" --path "src/auth"
+
+# Add metrics to every commit
+codilay commit-doc --last 50 --metrics
+
+# Skip the cost preview and run immediately
+codilay commit-doc --all --yes
+
+# Parallelism (default: 4 workers)
+codilay commit-doc --all --workers 8
+
+# Re-process commits that already have docs
+codilay commit-doc --all --force
+
+# Only add metrics to commits that are documented but lack them
+codilay commit-doc --all --force-metrics
+```
+
+Backfill shows a cost preview before running (estimated at ~$0.01/commit, ~$0.02 with `--metrics`) and prompts `[c]ontinue / [f]orce / [q]uit`. Already-documented commits are skipped automatically — safe to re-run at any time. After backfill completes, `codilay/commit-docs/index.md` is updated with a full changelog.
+
+**Auto-generate on every commit** with a post-commit git hook:
+
+```bash
+# Install the hook (appends to existing hooks safely)
+codilay hooks install . --commit-doc
+
+# Remove it
+codilay hooks uninstall . --commit-doc
+```
+
+The hook runs `codilay commit-doc` silently in the background after each commit — zero friction for the developer.
+
+**Browsable in the Web UI** — the **Commits** tab shows all generated docs as cards (hash, date, commit message), click any to read the full doc with visual score bars for metrics. The backfill controls are also available directly from the UI.
+
 ### 🛡️ System Audits (Architecture & Security)
 Run AI-powered audits against your architecture, security, performance, and code quality. Passive mode uses existing context (fast), while active mode deeply inspects files (thorough). 
 
@@ -478,6 +570,21 @@ Audits can be managed and viewed from the **CLI**, the **Interactive Menu**, or 
 | `codilay annotate .` | Write docstrings and wire comments back into source files |
 | `codilay annotate . --dry-run` | Preview annotations without writing |
 | `codilay annotate . --rollback <id>` | Undo a previous annotation run |
+| `codilay commit-doc` | Generate a plain-language doc for the last commit |
+| `codilay commit-doc <hash>` | Generate a doc for a specific commit |
+| `codilay commit-doc --range main..HEAD` | Generate docs for all commits in a range |
+| `codilay commit-doc --metrics` | Include 5-dimension quality metrics analysis |
+| `codilay commit-doc --all` | Backfill docs for every commit in the repo |
+| `codilay commit-doc --last N` | Backfill the last N commits |
+| `codilay commit-doc --from A --to B` | Backfill a specific commit range (inclusive) |
+| `codilay commit-doc --all --author "name"` | Backfill only commits by a given author |
+| `codilay commit-doc --all --path "src/"` | Backfill only commits touching a path |
+| `codilay commit-doc --all --force` | Re-process commits that already have docs |
+| `codilay commit-doc --all --force-metrics` | Add metrics to documented commits that lack them |
+| `codilay commit-doc --all --workers N` | Parallel workers for backfill (default: 4) |
+| `codilay commit-doc --all --yes` | Skip cost preview and run immediately |
+| `codilay hooks install . --commit-doc` | Auto-generate commit docs via post-commit hook |
+| `codilay hooks uninstall . --commit-doc` | Remove the post-commit hook |
 
 ---
 
@@ -582,6 +689,7 @@ src/codilay/
 ├── search.py           # Full-text conversation search (inverted index)
 ├── scheduler.py        # Cron & commit-based auto re-runs
 ├── annotator.py        # Code annotation engine (writes docs back into source files)
+├── commit_doc.py       # Commit documentation & metrics (diff → plain-language doc + quality scores)
 └── web/                # Premium Glassmorphic Frontend
 
 vscode-extension/       # VSCode extension for inline doc surfacing

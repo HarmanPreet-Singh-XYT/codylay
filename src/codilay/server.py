@@ -1309,6 +1309,178 @@ def create_app(
         with open(report_path, "r", encoding="utf-8") as f:
             return {"content": f.read()}
 
+    # ── Feature 11: Commit Docs ────────────────────────────────────
+
+    class CommitDocRequest(BaseModel):
+        commit_hash: Optional[str] = None
+        commit_range: Optional[str] = None
+        use_context: bool = False
+        include_metrics: bool = False
+        # Backfill fields
+        backfill: bool = False
+        from_ref: Optional[str] = None
+        to_ref: str = "HEAD"
+        last_n: Optional[int] = None
+        author: Optional[str] = None
+        path_filter: Optional[str] = None
+        include_merges: bool = False
+        force: bool = False
+        force_metrics: bool = False
+        workers: int = 4
+
+    @app.get("/api/commit-docs")
+    async def list_commit_docs():
+        docs_dir = os.path.join(output_dir, "commit-docs")
+        if not os.path.isdir(docs_dir):
+            return {"docs": []}
+
+        docs = []
+        for fname in os.listdir(docs_dir):
+            if not fname.endswith(".md"):
+                continue
+            short_hash = fname[:-3]
+            fpath = os.path.join(docs_dir, fname)
+            mtime = os.path.getmtime(fpath)
+            date = ""
+            message = ""
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                for line in lines[:5]:
+                    s = line.strip()
+                    if s.startswith("# ") and " — " in s:
+                        parts = s.lstrip("# ").split(" — ", 1)
+                        if len(parts) == 2:
+                            date = parts[1]
+                        break
+                for line in lines[:10]:
+                    s = line.strip()
+                    if s.startswith(">"):
+                        message = s.lstrip("> ").strip()
+                        break
+            except Exception:
+                pass
+            docs.append({"hash": short_hash, "filename": fname, "date": date, "message": message, "mtime": mtime})
+
+        docs.sort(key=lambda d: d["mtime"], reverse=True)
+        return {"docs": docs}
+
+    @app.get("/api/commit-docs/index")
+    async def get_commit_index():
+        index_path = os.path.join(output_dir, "commit-docs", "index.md")
+        if not os.path.exists(index_path):
+            raise HTTPException(status_code=404, detail="No index found — generate some commit docs first")
+        with open(index_path, "r", encoding="utf-8") as f:
+            return {"content": f.read()}
+
+    class BackfillEstimateRequest(BaseModel):
+        from_ref: Optional[str] = None
+        to_ref: str = "HEAD"
+        last_n: Optional[int] = None
+        author: Optional[str] = None
+        path_filter: Optional[str] = None
+        include_merges: bool = False
+        include_metrics: bool = False
+        force: bool = False
+
+    @app.post("/api/commit-docs/estimate")
+    async def estimate_backfill_endpoint(req: BackfillEstimateRequest):
+        try:
+            from codilay.commit_doc import CommitDocGenerator
+
+            gen = CommitDocGenerator(None, output_dir)  # no LLM needed for estimate
+            result = await asyncio.to_thread(
+                gen.estimate_backfill,
+                target_path,
+                req.from_ref,
+                req.to_ref,
+                req.author,
+                req.path_filter,
+                req.include_merges,
+                req.last_n,
+                req.include_metrics,
+                req.force,
+            )
+            return result
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/commit-docs/{short_hash}")
+    async def get_commit_doc(short_hash: str):
+        short_hash = os.path.basename(short_hash)
+        fpath = os.path.join(output_dir, "commit-docs", f"{short_hash}.md")
+        if not os.path.exists(fpath):
+            raise HTTPException(status_code=404, detail="Commit doc not found")
+        with open(fpath, "r", encoding="utf-8") as f:
+            return {"hash": short_hash, "content": f.read()}
+
+    @app.post("/api/commit-docs")
+    async def generate_commit_doc_endpoint(req: CommitDocRequest):
+        try:
+            settings = Settings.load()
+            settings.inject_env_vars()
+            cfg = CodiLayConfig(target_path=target_path)
+            cfg.llm_provider = settings.default_provider
+            cfg.llm_model = settings.default_model
+            if settings.custom_base_url:
+                cfg.llm_base_url = settings.custom_base_url
+
+            from codilay.commit_doc import CommitDocGenerator
+            from codilay.llm_client import LLMClient
+
+            llm = LLMClient(cfg)
+            gen = CommitDocGenerator(llm, output_dir)
+
+            codebase_md_path = None
+            if req.use_context:
+                candidate = os.path.join(output_dir, "CODEBASE.md")
+                if os.path.exists(candidate):
+                    codebase_md_path = candidate
+
+            if req.backfill or req.from_ref is not None or req.last_n is not None:
+                summary = await asyncio.to_thread(
+                    gen.backfill,
+                    target_path,
+                    req.from_ref,
+                    req.to_ref,
+                    req.author,
+                    req.path_filter,
+                    req.include_merges,
+                    req.last_n,
+                    req.use_context,
+                    codebase_md_path,
+                    req.include_metrics,
+                    req.force,
+                    req.force_metrics,
+                    min(req.workers, 4),  # cap at 4 for web-triggered requests
+                )
+                return summary
+            elif req.commit_range:
+                results = await asyncio.to_thread(
+                    gen.generate_range,
+                    req.commit_range,
+                    target_path,
+                    req.use_context,
+                    codebase_md_path,
+                    req.include_metrics,
+                )
+                return {"generated": results}
+            else:
+                commit_hash = req.commit_hash
+                if not commit_hash:
+                    commit_hash = await asyncio.to_thread(gen.get_last_commit, target_path)
+                result = await asyncio.to_thread(
+                    gen.generate,
+                    commit_hash,
+                    target_path,
+                    req.use_context,
+                    codebase_md_path,
+                    req.include_metrics,
+                )
+                return result
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     return app
 
 

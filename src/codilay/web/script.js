@@ -1748,6 +1748,397 @@ function toolScheduleInfo() {
     </div>`;
 }
 
+// ── Commit Docs view ─────────────────────────────────────────────────────────
+let activeCommitHash = null;
+
+async function renderCommitDocsView() {
+    const container = document.getElementById('main-content');
+    container.innerHTML = `
+    <div style="padding: 32px;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
+            <div>
+                <h2 style="font-size:18px;font-weight:600;margin-bottom:8px;">Commit Docs</h2>
+                <p style="color:var(--text-muted);font-size:13px;max-width:560px;">
+                    Plain-language documentation for each commit — what changed, why each file was touched, and what to watch out for.
+                </p>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;background:var(--bg-secondary);padding:16px;border-radius:8px;border:1px solid var(--border);min-width:280px;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="cd-hash-input" placeholder="Commit hash (blank = latest)" style="flex:1;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:monospace;">
+                    <button class="tool-btn primary" onclick="generateCommitDoc()"><i data-lucide="zap" style="width:14px;height:14px;"></i> Generate</button>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="cd-range-input" placeholder="Range, e.g. main..HEAD" style="flex:1;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:monospace;">
+                    <button class="tool-btn" onclick="generateCommitDocRange()"><i data-lucide="list" style="width:14px;height:14px;"></i> Range</button>
+                </div>
+                <div style="display:flex;gap:16px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-context-toggle" style="accent-color:var(--accent);"> Include CODEBASE.md context
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-metrics-toggle" style="accent-color:var(--accent);"> Quality metrics
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div id="cd-status" style="display:none;margin-bottom:16px;padding:12px 16px;border-radius:6px;font-size:13px;"></div>
+
+        <!-- Backfill section -->
+        <details id="cd-backfill-section" style="margin-bottom:24px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;">
+            <summary style="padding:12px 16px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;">
+                <i data-lucide="history" style="width:14px;height:14px;color:var(--accent);"></i>
+                Backfill History
+                <span style="font-size:11px;font-weight:400;color:var(--text-muted);margin-left:4px;">— document existing commits</span>
+            </summary>
+            <div style="padding:16px;border-top:1px solid var(--border);">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+                    <div>
+                        <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:3px;">From (hash or YYYY-MM-DD)</label>
+                        <input id="cd-from-input" placeholder="e.g. abc123f or 2024-01-01" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:3px;">To (hash, default: HEAD)</label>
+                        <input id="cd-to-input" placeholder="HEAD" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;font-family:monospace;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:3px;">Last N commits</label>
+                        <input id="cd-lastn-input" type="number" min="1" placeholder="e.g. 50" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;box-sizing:border-box;">
+                    </div>
+                    <div>
+                        <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:3px;">Author filter</label>
+                        <input id="cd-author-input" placeholder="name or email" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;box-sizing:border-box;">
+                    </div>
+                    <div style="grid-column:1/-1;">
+                        <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:3px;">Path filter</label>
+                        <input id="cd-path-input" placeholder="e.g. src/payments/" style="width:100%;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:12px;box-sizing:border-box;">
+                    </div>
+                </div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-bf-context" style="accent-color:var(--accent);"> CODEBASE.md context
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-bf-metrics" style="accent-color:var(--accent);"> Quality metrics
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-bf-merges" style="accent-color:var(--accent);"> Include merges
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-bf-force" style="accent-color:var(--accent);"> Force re-process all
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;">
+                        <input type="checkbox" id="cd-bf-force-metrics" style="accent-color:var(--accent);"> Force metrics only
+                    </label>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <button class="tool-btn primary" onclick="previewBackfill()"><i data-lucide="search" style="width:14px;height:14px;"></i> Preview</button>
+                    <button class="tool-btn" onclick="startBackfill()"><i data-lucide="play" style="width:14px;height:14px;"></i> Start</button>
+                    <span style="font-size:11px;color:var(--text-muted);">For large histories (&gt;200 commits) use the CLI for better progress tracking.</span>
+                </div>
+                <div id="cd-backfill-preview" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border-radius:6px;border:1px solid var(--border);font-size:12px;"></div>
+            </div>
+        </details>
+
+        <div id="cd-list-container" style="margin-bottom:24px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;">Generated Docs</h3>
+                <button class="tool-btn" onclick="viewCommitIndex()" style="font-size:11px;"><i data-lucide="book-open" style="width:12px;height:12px;"></i> Index</button>
+            </div>
+            <div id="cd-list">Loading...</div>
+        </div>
+
+        <div id="cd-detail" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+            <div style="padding:12px 16px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+                <span id="cd-detail-title" style="font-size:13px;font-weight:600;font-family:monospace;"></span>
+                <button class="tool-btn" onclick="closeCommitDoc()" style="font-size:11px;padding:4px 10px;">Close</button>
+            </div>
+            <div id="cd-detail-content" style="padding:28px 32px;font-size:13px;line-height:1.7;overflow:auto;max-height:60vh;" class="doc-content"></div>
+        </div>
+    </div>
+    `;
+    updateIcons();
+    loadCommitDocList();
+}
+
+async function loadCommitDocList() {
+    const listEl = document.getElementById('cd-list');
+    if (!listEl) return;
+    try {
+        const res = await fetch('/api/commit-docs');
+        if (!res.ok) throw new Error('Failed to load commit docs');
+        const data = await res.json();
+        const docs = data.docs || [];
+
+        if (docs.length === 0) {
+            listEl.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:16px;background:var(--bg-secondary);border-radius:6px;border:1px dashed var(--border);">No commit docs yet. Use the controls above to generate one.</div>';
+            return;
+        }
+
+        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;">';
+        docs.forEach(doc => {
+            const isActive = doc.hash === activeCommitHash;
+            html += `
+            <div class="tool-card" style="cursor:pointer;${isActive ? 'border-color:var(--accent);' : ''}" onclick="viewCommitDoc('${escAttr(doc.hash)}')">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                    <code style="font-size:13px;font-weight:600;color:var(--accent);">${escHtml(doc.hash)}</code>
+                    ${doc.date ? `<span style="font-size:10px;color:var(--text-muted);margin-left:8px;white-space:nowrap;">${escHtml(doc.date)}</span>` : ''}
+                </div>
+                ${doc.message ? `<p style="font-size:12px;color:var(--text-muted);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(doc.message)}</p>` : ''}
+            </div>`;
+        });
+        html += '</div>';
+        listEl.innerHTML = html;
+        updateIcons();
+    } catch(e) {
+        listEl.innerHTML = `<span style="color:var(--red);">${escHtml(e.message)}</span>`;
+    }
+}
+
+async function viewCommitDoc(hash) {
+    activeCommitHash = hash;
+    const detailEl = document.getElementById('cd-detail');
+    const contentEl = document.getElementById('cd-detail-content');
+    const titleEl = document.getElementById('cd-detail-title');
+
+    detailEl.style.display = 'block';
+    titleEl.textContent = hash;
+    contentEl.innerHTML = '<div class="spinner"></div>';
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    try {
+        const res = await fetch(`/api/commit-docs/${encodeURIComponent(hash)}`);
+        if (!res.ok) throw new Error('Failed to load doc');
+        const data = await res.json();
+        // Strip the embedded JSON comment before passing to markdown renderer
+        const mdContent = data.content.replace(/<!--\s*codilay-metrics:[\s\S]*?-->/g, '');
+        contentEl.innerHTML = renderMarkdown(mdContent) + renderCommitMetrics(data.content);
+        hljs.highlightAll();
+        updateIcons();
+    } catch(e) {
+        contentEl.innerHTML = `<div style="color:var(--red);">${escHtml(e.message)}</div>`;
+    }
+
+    // Refresh list to highlight active card
+    loadCommitDocList();
+}
+
+function closeCommitDoc() {
+    activeCommitHash = null;
+    const detailEl = document.getElementById('cd-detail');
+    if (detailEl) detailEl.style.display = 'none';
+    loadCommitDocList();
+}
+
+function cdBackfillPayload() {
+    return {
+        backfill: true,
+        from_ref: document.getElementById('cd-from-input').value.trim() || null,
+        to_ref: document.getElementById('cd-to-input').value.trim() || 'HEAD',
+        last_n: parseInt(document.getElementById('cd-lastn-input').value) || null,
+        author: document.getElementById('cd-author-input').value.trim() || null,
+        path_filter: document.getElementById('cd-path-input').value.trim() || null,
+        include_merges: document.getElementById('cd-bf-merges').checked,
+        use_context: document.getElementById('cd-bf-context').checked,
+        include_metrics: document.getElementById('cd-bf-metrics').checked,
+        force: document.getElementById('cd-bf-force').checked,
+        force_metrics: document.getElementById('cd-bf-force-metrics').checked,
+        workers: 4,
+    };
+}
+
+async function previewBackfill() {
+    const previewEl = document.getElementById('cd-backfill-preview');
+    previewEl.style.display = 'block';
+    previewEl.innerHTML = '<span style="color:var(--text-muted);">Estimating…</span>';
+    const payload = cdBackfillPayload();
+    // Use estimate endpoint — POST with estimate_only flag
+    payload.estimate_only = true;
+    try {
+        const res = await fetch('/api/commit-docs/estimate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Estimate failed');
+        const d = await res.json();
+        previewEl.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+                <div><span style="color:var(--text-muted);">Total commits</span><br><strong>${d.total}</strong></div>
+                <div><span style="color:var(--text-muted);">Already done</span><br><strong style="color:var(--green);">${d.already_documented}</strong></div>
+                <div><span style="color:var(--text-muted);">To process</span><br><strong style="color:var(--accent);">${d.will_process}</strong></div>
+            </div>
+            <div style="color:var(--orange);">Estimated cost: ~$${d.estimated_cost.toFixed(2)}</div>
+        `;
+    } catch(e) {
+        previewEl.innerHTML = `<span style="color:var(--red);">${escHtml(e.message)}</span>`;
+    }
+}
+
+async function startBackfill() {
+    cdSetStatus('Starting backfill — this may take a while for large histories…', 'info');
+    const payload = cdBackfillPayload();
+    try {
+        const res = await fetch('/api/commit-docs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Backfill failed');
+        }
+        const d = await res.json();
+        const processed = (d.processed || []).length;
+        const metricsOnly = (d.metrics_only || []).length;
+        const errors = (d.errors || []).length;
+        cdSetStatus(
+            `Backfill complete — ${processed} processed, ${metricsOnly} metrics-only, ${d.skipped || 0} skipped${errors ? `, ${errors} errors` : ''}`,
+            errors ? 'error' : 'success'
+        );
+        await loadCommitDocList();
+    } catch(e) {
+        cdSetStatus(e.message, 'error');
+    }
+}
+
+async function viewCommitIndex() {
+    const detailEl = document.getElementById('cd-detail');
+    const contentEl = document.getElementById('cd-detail-content');
+    const titleEl = document.getElementById('cd-detail-title');
+    detailEl.style.display = 'block';
+    titleEl.textContent = 'index.md';
+    contentEl.innerHTML = '<div class="spinner"></div>';
+    detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try {
+        const res = await fetch('/api/commit-docs/index');
+        if (!res.ok) throw new Error('Index not found — generate at least one commit doc first');
+        const d = await res.json();
+        contentEl.innerHTML = renderMarkdown(d.content);
+        updateIcons();
+    } catch(e) {
+        contentEl.innerHTML = `<div style="color:var(--red);">${escHtml(e.message)}</div>`;
+    }
+}
+
+function cdSetStatus(msg, type) {
+    const el = document.getElementById('cd-status');
+    if (!el) return;
+    const colors = { info: 'var(--accent)', error: 'var(--red)', success: 'var(--green)' };
+    const bgs = { info: 'rgba(59,130,246,.08)', error: 'rgba(239,68,68,.08)', success: 'rgba(34,197,94,.08)' };
+    el.style.display = 'block';
+    el.style.color = colors[type] || 'var(--text)';
+    el.style.background = bgs[type] || 'var(--bg-secondary)';
+    el.style.border = `1px solid ${colors[type] || 'var(--border)'}`;
+    el.textContent = msg;
+}
+
+async function generateCommitDoc() {
+    const hash = document.getElementById('cd-hash-input').value.trim() || null;
+    const useContext = document.getElementById('cd-context-toggle').checked;
+    const includeMetrics = document.getElementById('cd-metrics-toggle').checked;
+    cdSetStatus('Generating commit doc…', 'info');
+    try {
+        const res = await fetch('/api/commit-docs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commit_hash: hash, use_context: useContext, include_metrics: includeMetrics }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Generation failed');
+        }
+        const data = await res.json();
+        cdSetStatus(`Doc generated for ${data.hash}`, 'success');
+        await loadCommitDocList();
+        viewCommitDoc(data.hash);
+    } catch(e) {
+        cdSetStatus(e.message, 'error');
+    }
+}
+
+async function generateCommitDocRange() {
+    const range = document.getElementById('cd-range-input').value.trim();
+    if (!range) { cdSetStatus('Enter a commit range first, e.g. main..HEAD', 'error'); return; }
+    const useContext = document.getElementById('cd-context-toggle').checked;
+    const includeMetrics = document.getElementById('cd-metrics-toggle').checked;
+    cdSetStatus(`Generating docs for range "${range}"…`, 'info');
+    try {
+        const res = await fetch('/api/commit-docs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ commit_range: range, use_context: useContext, include_metrics: includeMetrics }),
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Generation failed');
+        }
+        const data = await res.json();
+        const count = (data.generated || []).length;
+        cdSetStatus(`Generated ${count} commit doc${count !== 1 ? 's' : ''}`, 'success');
+        await loadCommitDocList();
+        if (data.generated && data.generated.length > 0) {
+            viewCommitDoc(data.generated[data.generated.length - 1].hash);
+        }
+    } catch(e) {
+        cdSetStatus(e.message, 'error');
+    }
+}
+
+function renderCommitMetrics(content) {
+    // Extract embedded metrics JSON from HTML comment
+    const match = content.match(/<!--\s*codilay-metrics:\s*(\{[\s\S]*?\})\s*-->/);
+    if (!match) return '';
+    let data;
+    try { data = JSON.parse(match[1]); } catch(e) { return ''; }
+
+    const metrics = data.metrics || [];
+    const notes = data.reviewer_notes || [];
+
+    function scoreColor(score) {
+        if (score === -1) return 'var(--text-muted)';
+        if (score >= 8) return 'var(--green)';
+        if (score >= 6) return 'var(--orange)';
+        return 'var(--red)';
+    }
+    function scoreBar(score) {
+        if (score === -1) return '<span style="font-size:11px;color:var(--text-muted);">N/A</span>';
+        const filled = Math.round(score);
+        const empty = 10 - filled;
+        const color = scoreColor(score);
+        return `<span style="color:${color};letter-spacing:1px;">${'█'.repeat(filled)}${'░'.repeat(empty)}</span><span style="font-size:11px;color:${color};margin-left:6px;font-weight:600;">${score}/10</span>`;
+    }
+
+    let html = `
+    <div style="margin-top:28px;border-top:1px solid var(--border);padding-top:20px;">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:16px;">Commit Metrics</h3>
+        <div style="display:grid;gap:10px;">`;
+
+    for (const m of metrics) {
+        html += `
+        <div style="display:grid;grid-template-columns:130px 1fr auto;align-items:center;gap:12px;padding:10px 14px;background:var(--bg-secondary);border-radius:6px;border:1px solid var(--border);">
+            <span style="font-size:12px;font-weight:500;">${escHtml(m.name)}</span>
+            <span style="font-size:12px;color:var(--text-muted);">${escHtml(m.note || '')}</span>
+            <div style="white-space:nowrap;">${scoreBar(m.score)}</div>
+        </div>`;
+    }
+    html += '</div>';
+
+    if (notes.length > 0) {
+        html += `<div style="margin-top:16px;">
+            <div style="font-size:12px;font-weight:600;color:var(--orange);margin-bottom:8px;">Reviewer Notes</div>`;
+        for (const note of notes) {
+            html += `<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;font-size:12px;color:var(--text-muted);">
+                <span style="color:var(--orange);flex-shrink:0;">⚠</span>
+                <span>${escHtml(note)}</span>
+            </div>`;
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
 // ── View switching ───────────────────────────────────────────────────────────
 function switchView(view) {
     currentView = view;
@@ -1761,6 +2152,7 @@ function switchView(view) {
     else if (view === 'search') renderSearchView();
     else if (view === 'team') renderTeamView();
     else if (view === 'audit') renderAuditView();
+    else if (view === 'commit-docs') renderCommitDocsView();
     else if (view === 'tools') renderToolsView();
 }
 
